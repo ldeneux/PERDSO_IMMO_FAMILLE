@@ -35,8 +35,8 @@ const NAV_ITEMS = [
   { key: "contacts", label: "Contacts", icon: Users },
   { key: "biens", label: "Biens", icon: Home },
   { key: "baux", label: "Contrats", icon: FileText },
-  { key: "suivi", label: "Suivi des écritures", icon: BookOpen, soon: true },
-  { key: "synthese", label: "Synthèse", icon: BarChart3, soon: true },
+  { key: "suivi", label: "Suivi des écritures", icon: BookOpen },
+  { key: "synthese", label: "Synthèse", icon: BarChart3 },
 ];
 
 export default function ImmoApp({ session }) {
@@ -144,7 +144,7 @@ export default function ImmoApp({ session }) {
         {activeTab === "biens" && <BiensTab biens={biens} baux={baux} />}
         {activeTab === "baux" && <BauxTab baux={baux} biens={biens} contacts={contacts} bienById={bienById} contactById={contactById} />}
         {activeTab === "suivi" && <SuiviTab biens={biens} baux={baux} bienById={bienById} />}
-        {activeTab === "synthese" && <SoonTab title="Synthèse" desc="Le tableau coût / gain par bien arrive dans une prochaine étape." />}
+        {activeTab === "synthese" && <SyntheseTab biens={biens} />}
       </main>
     </div>
   );
@@ -155,6 +155,194 @@ function SoonTab({ title, desc }) {
     <div className="max-w-2xl mx-auto p-5 sm:p-8">
       <h1 className="font-serif text-2xl text-blue-900 tracking-tight">{title}</h1>
       <p className="text-stone-500 text-sm mt-2">{desc}</p>
+    </div>
+  );
+}
+
+/* ---------------- SYNTHÈSE ---------------- */
+
+function SyntheseTab({ biens }) {
+  const [entries, setEntries] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedBienId, setSelectedBienId] = useState(biens[0]?.id || null);
+
+  const fetchEntries = useCallback(async () => {
+    const { data, error } = await supabase.from("ecritures_locatives").select("*").order("date", { ascending: true });
+    if (!error) setEntries(data || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchEntries();
+    const channel = supabase
+      .channel("synthese-changes")
+      .on("postgres_changes", { event: "*", schema: "public", table: "ecritures_locatives" }, fetchEntries)
+      .subscribe();
+    return () => supabase.removeChannel(channel);
+  }, [fetchEntries]);
+
+  useEffect(() => {
+    if (!selectedBienId && biens.length) setSelectedBienId(biens[0].id);
+  }, [biens, selectedBienId]);
+
+  const bien = biens.find((b) => b.id === selectedBienId);
+  const bienEntries = entries.filter((e) => e.bien_id === selectedBienId);
+
+  const { years, categories, table, totalsByCategory, grandTotal } = useMemo(() => {
+    const yearsSet = new Set();
+    const catsSet = new Set();
+    const map = {}; // year -> category -> signed amount
+    bienEntries.forEach((e) => {
+      const year = e.date.slice(0, 4);
+      yearsSet.add(year);
+      catsSet.add(e.categorie);
+      const signed = (e.type === "credit" ? 1 : -1) * Number(e.amount);
+      map[year] = map[year] || {};
+      map[year][e.categorie] = (map[year][e.categorie] || 0) + signed;
+    });
+    const years = Array.from(yearsSet).sort((a, b) => b.localeCompare(a));
+    const categories = Array.from(catsSet).sort();
+    const totalsByCategory = {};
+    let grandTotal = 0;
+    categories.forEach((c) => { totalsByCategory[c] = 0; });
+    years.forEach((y) => {
+      categories.forEach((c) => {
+        const v = map[y]?.[c] || 0;
+        totalsByCategory[c] += v;
+        grandTotal += v;
+      });
+    });
+    return { years, categories, table: map, totalsByCategory, grandTotal };
+  }, [bienEntries]);
+
+  const acquisitionCost = bien
+    ? Number(bien.prix_achat || 0) + Number(bien.prix_notaire || 0) + Number(bien.prix_mobilier || 0)
+    : 0;
+  const gainCoutPct = acquisitionCost > 0 ? (grandTotal / acquisitionCost) * 100 : null;
+  const coutFinal = acquisitionCost - grandTotal;
+  const nbYears = years.length || 1;
+  const cashflowMoyenAnnuel = grandTotal / nbYears;
+  const loyerTotal = (totalsByCategory["Loyer"] || 0) + (totalsByCategory["Variable"] || 0) + (totalsByCategory["RBE"] || 0);
+  const rendementBrut = acquisitionCost > 0 && nbYears > 0 ? ((loyerTotal / nbYears) / acquisitionCost) * 100 : null;
+
+  if (loading) return <div className="p-8 text-sm text-stone-400">Chargement…</div>;
+
+  return (
+    <div className="max-w-5xl mx-auto p-5 sm:p-8 space-y-6">
+      <div>
+        <h1 className="font-serif text-2xl text-blue-900 tracking-tight">Synthèse</h1>
+        <p className="text-stone-500 text-sm mt-1">Coût / gain par bien, année par année.</p>
+      </div>
+
+      <div className="flex flex-col sm:flex-row gap-4">
+        <aside className="sm:w-64 shrink-0 space-y-1">
+          {biens.length === 0 && <p className="text-sm text-stone-400">Aucun bien.</p>}
+          {biens.map((b) => (
+            <button
+              key={b.id}
+              onClick={() => setSelectedBienId(b.id)}
+              className={`w-full text-left text-sm px-3 py-2 rounded-md ${selectedBienId === b.id ? "bg-blue-900 text-white" : "bg-white text-stone-700 hover:bg-stone-100 border border-stone-200"}`}
+            >
+              {b.name}
+            </button>
+          ))}
+        </aside>
+
+        {!bien ? (
+          <div className="flex-1 text-sm text-stone-400 py-8 text-center">Sélectionne un bien.</div>
+        ) : (
+          <div className="flex-1 min-w-0 space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <SyntheseMetric label="Gain cumulé" value={formatEUR(grandTotal)} tone={grandTotal >= 0 ? "emerald" : "rose"} />
+              <SyntheseMetric label="Coût d'acquisition" value={formatEUR(acquisitionCost)} tone="stone" />
+              <SyntheseMetric label="Gain / Coût" value={gainCoutPct != null ? `${gainCoutPct.toFixed(1)} %` : "—"} tone={gainCoutPct != null && gainCoutPct >= 0 ? "emerald" : "rose"} />
+              <SyntheseMetric label="Coût final net" value={formatEUR(coutFinal)} tone={coutFinal <= 0 ? "emerald" : "amber"} />
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <SyntheseMetric label="Cash-flow net moyen / an" value={formatEUR(cashflowMoyenAnnuel)} tone={cashflowMoyenAnnuel >= 0 ? "emerald" : "rose"} small />
+              <SyntheseMetric label="Rendement brut estimé" value={rendementBrut != null ? `${rendementBrut.toFixed(1)} % / an` : "—"} tone="sky" small />
+              <SyntheseMetric label="Nombre d'années suivies" value={String(years.length)} tone="stone" small />
+            </div>
+
+            <div className="bg-white rounded-lg border border-stone-200 overflow-x-auto">
+              {categories.length === 0 ? (
+                <p className="text-sm text-stone-400 py-8 text-center">Aucune écriture pour ce bien.</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-stone-400 border-b border-stone-100">
+                      <th className="px-3 py-2 font-medium">Année</th>
+                      {categories.map((c) => <th key={c} className="px-3 py-2 font-medium text-right">{c}</th>)}
+                      <th className="px-3 py-2 font-medium text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-100">
+                    {years.map((y) => {
+                      const rowTotal = categories.reduce((s, c) => s + (table[y]?.[c] || 0), 0);
+                      return (
+                        <tr key={y}>
+                          <td className="px-3 py-2 text-stone-700 font-medium">{y}</td>
+                          {categories.map((c) => {
+                            const v = table[y]?.[c] || 0;
+                            return (
+                              <td key={c} className={`px-3 py-2 text-right font-mono text-xs ${v > 0 ? "text-emerald-700" : v < 0 ? "text-rose-700" : "text-stone-300"}`}>
+                                {v !== 0 ? formatEUR(v) : "—"}
+                              </td>
+                            );
+                          })}
+                          <td className={`px-3 py-2 text-right font-mono font-medium ${rowTotal >= 0 ? "text-emerald-700" : "text-rose-700"}`}>{formatEUR(rowTotal)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-stone-200 bg-stone-50">
+                      <td className="px-3 py-2 font-semibold text-stone-800">Total</td>
+                      {categories.map((c) => (
+                        <td key={c} className={`px-3 py-2 text-right font-mono text-xs font-semibold ${totalsByCategory[c] > 0 ? "text-emerald-700" : totalsByCategory[c] < 0 ? "text-rose-700" : "text-stone-300"}`}>
+                          {formatEUR(totalsByCategory[c])}
+                        </td>
+                      ))}
+                      <td className={`px-3 py-2 text-right font-mono font-semibold ${grandTotal >= 0 ? "text-emerald-700" : "text-rose-700"}`}>{formatEUR(grandTotal)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              )}
+            </div>
+
+            <div className="bg-white rounded-lg border border-stone-200 p-4">
+              <p className="text-xs font-medium text-stone-600 mb-3">Coûts d'acquisition</p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+                <CoutLigne label="Immobilier" value={bien.prix_achat} />
+                <CoutLigne label="Notaire" value={bien.prix_notaire} />
+                <CoutLigne label="Mobilier" value={bien.prix_mobilier} />
+                <CoutLigne label="Apport" value={bien.apport} />
+                <CoutLigne label="Montant emprunté" value={bien.montant_pret} />
+                <CoutLigne label="Coût total (Immo + Notaire + Mobilier)" value={acquisitionCost} bold />
+              </div>
+              <p className="text-[11px] text-stone-400 mt-3">Modifiable dans l'onglet Biens, fiche du bien.</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SyntheseMetric({ label, value, tone, small }) {
+  return (
+    <div className="bg-white rounded-lg border border-stone-200 p-3">
+      <p className="text-[11px] text-stone-500 mb-1">{label}</p>
+      <p className={`font-mono ${small ? "text-sm" : "text-lg"} text-${tone}-700`}>{value}</p>
+    </div>
+  );
+}
+
+function CoutLigne({ label, value, bold }) {
+  return (
+    <div className={bold ? "font-semibold text-stone-800" : "text-stone-600"}>
+      <p className="text-[11px] text-stone-400">{label}</p>
+      <p className="font-mono">{value != null ? formatEUR(value) : "—"}</p>
     </div>
   );
 }
@@ -402,6 +590,10 @@ function BienModal({ bien, onCancel, onSave, onDelete }) {
   const [complementDesignation, setComplementDesignation] = useState(bien?.complement_designation || "");
   const [dateAcquisition, setDateAcquisition] = useState(bien?.date_acquisition || "");
   const [prixAchat, setPrixAchat] = useState(bien?.prix_achat != null ? String(bien.prix_achat) : "");
+  const [prixNotaire, setPrixNotaire] = useState(bien?.prix_notaire != null ? String(bien.prix_notaire) : "");
+  const [prixMobilier, setPrixMobilier] = useState(bien?.prix_mobilier != null ? String(bien.prix_mobilier) : "");
+  const [apport, setApport] = useState(bien?.apport != null ? String(bien.apport) : "");
+  const [montantPret, setMontantPret] = useState(bien?.montant_pret != null ? String(bien.montant_pret) : "");
   const [notes, setNotes] = useState(bien?.notes || "");
   const [error, setError] = useState("");
 
@@ -448,8 +640,27 @@ function BienModal({ bien, onCancel, onSave, onDelete }) {
             <input value={address} onChange={(e) => setAddress(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
-            <label className="text-xs text-stone-500 block mb-1">Prix d'achat (€)</label>
+            <label className="text-xs text-stone-500 block mb-1">Prix immobilier (€)</label>
             <input type="number" min="0" value={prixAchat} onChange={(e) => setPrixAchat(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div className="sm:col-span-2 pt-2 border-t border-stone-100">
+            <p className="text-xs font-medium text-stone-600 mb-2">Coûts d'acquisition (pour la Synthèse)</p>
+          </div>
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Frais de notaire (€)</label>
+            <input type="number" min="0" value={prixNotaire} onChange={(e) => setPrixNotaire(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Mobilier (€)</label>
+            <input type="number" min="0" value={prixMobilier} onChange={(e) => setPrixMobilier(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Apport (€)</label>
+            <input type="number" min="0" value={apport} onChange={(e) => setApport(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Montant emprunté (€)</label>
+            <input type="number" min="0" value={montantPret} onChange={(e) => setMontantPret(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div className="sm:col-span-2">
             <label className="text-xs text-stone-500 block mb-1">Désignation complémentaire (bâtiment, étage, équipements...)</label>
@@ -476,6 +687,10 @@ function BienModal({ bien, onCancel, onSave, onDelete }) {
                   complement_designation: complementDesignation.trim() || null,
                   date_acquisition: dateAcquisition || null,
                   prix_achat: prixAchat ? parseFloat(prixAchat) : null,
+                  prix_notaire: prixNotaire ? parseFloat(prixNotaire) : null,
+                  prix_mobilier: prixMobilier ? parseFloat(prixMobilier) : null,
+                  apport: apport ? parseFloat(apport) : null,
+                  montant_pret: montantPret ? parseFloat(montantPret) : null,
                   notes: notes.trim() || null,
                 });
               }}
