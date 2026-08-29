@@ -142,7 +142,7 @@ export default function ImmoApp({ session }) {
         {activeTab === "contacts" && <ContactsTab contacts={contacts} baux={baux} />}
         {activeTab === "biens" && <BiensTab biens={biens} baux={baux} />}
         {activeTab === "baux" && <BauxTab baux={baux} biens={biens} contacts={contacts} bienById={bienById} contactById={contactById} />}
-        {activeTab === "suivi" && <SoonTab title="Suivi des écritures" desc="Le suivi détaillé des loyers, charges et taxes par bien arrive dans une prochaine étape." />}
+        {activeTab === "suivi" && <SuiviTab biens={biens} baux={baux} bienById={bienById} />}
         {activeTab === "synthese" && <SoonTab title="Synthèse" desc="Le tableau coût / gain par bien arrive dans une prochaine étape." />}
       </main>
     </div>
@@ -209,7 +209,7 @@ function ContactsTab({ contacts }) {
             <tbody className="divide-y divide-stone-100">
               {contacts.map((c) => (
                 <tr key={c.id} onClick={() => setEditing(c)} className="cursor-pointer hover:bg-stone-50">
-                  <td className="px-4 py-2.5 text-stone-800">{c.civilite ? `${c.civilite} ` : ""}{c.first_name} {c.last_name}</td>
+                  <td className="px-4 py-2.5 text-stone-800">{c.societe ? c.societe : `${c.civilite ? `${c.civilite} ` : ""}${c.first_name} ${c.last_name}`}</td>
                   <td className="px-4 py-2.5 text-stone-500 capitalize">{c.type}</td>
                   <td className="px-4 py-2.5 text-stone-500">{c.email || "—"}</td>
                   <td className="px-4 py-2.5 text-stone-500">{c.phone || "—"}</td>
@@ -242,6 +242,7 @@ function ContactModal({ contact, onCancel, onSave, onDelete }) {
   const [phone, setPhone] = useState(contact?.phone || "");
   const [address, setAddress] = useState(contact?.address || "");
   const [type, setType] = useState(contact?.type || "locataire");
+  const [societe, setSociete] = useState(contact?.societe || "");
   const [notes, setNotes] = useState(contact?.notes || "");
   const [error, setError] = useState("");
 
@@ -268,6 +269,10 @@ function ContactModal({ contact, onCancel, onSave, onDelete }) {
               <option value="proprietaire">Propriétaire</option>
               <option value="autre">Autre</option>
             </select>
+          </div>
+          <div className="sm:col-span-2">
+            <label className="text-xs text-stone-500 block mb-1">Société (si applicable, ex: Vacancéole)</label>
+            <input value={societe} onChange={(e) => setSociete(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
             <label className="text-xs text-stone-500 block mb-1">Prénom</label>
@@ -303,8 +308,8 @@ function ContactModal({ contact, onCancel, onSave, onDelete }) {
             <button onClick={onCancel} className="px-3 py-1.5 text-sm rounded-md border border-stone-300 hover:bg-stone-100">Annuler</button>
             <button
               onClick={() => {
-                if (!firstName.trim() || !lastName.trim()) { setError("Prénom et nom sont obligatoires."); return; }
-                onSave({ civilite: civilite || null, first_name: firstName.trim(), last_name: lastName.trim(), email: email.trim() || null, phone: phone.trim() || null, address: address.trim() || null, type, notes: notes.trim() || null });
+                if (!societe.trim() && (!firstName.trim() || !lastName.trim())) { setError("Prénom et nom (ou société) sont obligatoires."); return; }
+                onSave({ civilite: civilite || null, first_name: firstName.trim(), last_name: lastName.trim(), societe: societe.trim() || null, email: email.trim() || null, phone: phone.trim() || null, address: address.trim() || null, type, notes: notes.trim() || null });
               }}
               className="px-3 py-1.5 text-sm rounded-md bg-blue-900 text-white hover:bg-blue-950"
             >
@@ -322,6 +327,8 @@ function ContactModal({ contact, onCancel, onSave, onDelete }) {
 function BiensTab({ biens, baux }) {
   const [editing, setEditing] = useState(undefined);
   const [error, setError] = useState("");
+  const STATUT_LABELS = { libre: "Libre", loue: "Loué", vendu: "Vendu" };
+  const STATUT_TONES = { libre: "text-stone-500 bg-stone-100", loue: "text-emerald-700 bg-emerald-50", vendu: "text-amber-700 bg-amber-50" };
   const activeBauxByBien = useMemo(() => {
     const m = {};
     baux.forEach((b) => { if (b.statut === "actif") m[b.bien_id] = (m[b.bien_id] || 0) + 1; });
@@ -365,11 +372,7 @@ function BiensTab({ biens, baux }) {
                 <p className="text-stone-800 font-medium">{b.name}</p>
                 <p className="text-xs text-stone-500 capitalize">{b.type}</p>
               </div>
-              {activeBauxByBien[b.id] ? (
-                <span className="text-[10px] text-emerald-700 bg-emerald-50 rounded px-1.5 py-0.5">Loué</span>
-              ) : (
-                <span className="text-[10px] text-stone-500 bg-stone-100 rounded px-1.5 py-0.5">Libre</span>
-              )}
+              <span className={`text-[10px] rounded px-1.5 py-0.5 ${STATUT_TONES[b.statut] || STATUT_TONES.libre}`}>{STATUT_LABELS[b.statut] || "Libre"}</span>
             </div>
             {b.address && <p className="text-xs text-stone-400 mt-2">{b.address}</p>}
           </button>
@@ -393,6 +396,9 @@ function BienModal({ bien, onCancel, onSave, onDelete }) {
   const [name, setName] = useState(bien?.name || "");
   const [address, setAddress] = useState(bien?.address || "");
   const [type, setType] = useState(bien?.type || "autre");
+  const [statut, setStatut] = useState(bien?.statut || "libre");
+  const [surfaceM2, setSurfaceM2] = useState(bien?.surface_m2 != null ? String(bien.surface_m2) : "");
+  const [complementDesignation, setComplementDesignation] = useState(bien?.complement_designation || "");
   const [dateAcquisition, setDateAcquisition] = useState(bien?.date_acquisition || "");
   const [prixAchat, setPrixAchat] = useState(bien?.prix_achat != null ? String(bien.prix_achat) : "");
   const [notes, setNotes] = useState(bien?.notes || "");
@@ -421,8 +427,20 @@ function BienModal({ bien, onCancel, onSave, onDelete }) {
             </select>
           </div>
           <div>
+            <label className="text-xs text-stone-500 block mb-1">Statut</label>
+            <select value={statut} onChange={(e) => setStatut(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="libre">Libre</option>
+              <option value="loue">Loué</option>
+              <option value="vendu">Vendu</option>
+            </select>
+          </div>
+          <div>
             <label className="text-xs text-stone-500 block mb-1">Date d'acquisition</label>
             <input type="date" value={dateAcquisition} onChange={(e) => setDateAcquisition(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Surface (m²)</label>
+            <input type="number" min="0" value={surfaceM2} onChange={(e) => setSurfaceM2(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div className="sm:col-span-2">
             <label className="text-xs text-stone-500 block mb-1">Adresse</label>
@@ -431,6 +449,10 @@ function BienModal({ bien, onCancel, onSave, onDelete }) {
           <div>
             <label className="text-xs text-stone-500 block mb-1">Prix d'achat (€)</label>
             <input type="number" min="0" value={prixAchat} onChange={(e) => setPrixAchat(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="text-xs text-stone-500 block mb-1">Désignation complémentaire (bâtiment, étage, équipements...)</label>
+            <textarea value={complementDesignation} onChange={(e) => setComplementDesignation(e.target.value)} rows={2} placeholder="Bâtiment A, 8ème étage, cave n°59, ascenseur, chauffage collectif..." className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div className="sm:col-span-2">
             <label className="text-xs text-stone-500 block mb-1">Notes</label>
@@ -448,7 +470,9 @@ function BienModal({ bien, onCancel, onSave, onDelete }) {
               onClick={() => {
                 if (!name.trim()) { setError("Le nom est obligatoire."); return; }
                 onSave({
-                  name: name.trim(), address: address.trim() || null, type,
+                  name: name.trim(), address: address.trim() || null, type, statut,
+                  surface_m2: surfaceM2 ? parseFloat(surfaceM2) : null,
+                  complement_designation: complementDesignation.trim() || null,
                   date_acquisition: dateAcquisition || null,
                   prix_achat: prixAchat ? parseFloat(prixAchat) : null,
                   notes: notes.trim() || null,
@@ -465,100 +489,533 @@ function BienModal({ bien, onCancel, onSave, onDelete }) {
   );
 }
 
+/* ---------------- SUIVI DES ÉCRITURES ---------------- */
+
+const CATEGORIES_SUIVI = ["Loyer", "Variable", "Charges", "Taxe Foncière", "Assurance", "Compta", "TVA", "Impot", "Caution", "Divers"];
+
+function SuiviTab({ biens, baux, bienById }) {
+  const [entries, setEntries] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filterBien, setFilterBien] = useState(null);
+  const [editing, setEditing] = useState(undefined);
+  const [error, setError] = useState("");
+
+  const fetchEntries = useCallback(async () => {
+    const { data, error } = await supabase.from("ecritures_locatives").select("*").order("date", { ascending: false });
+    if (!error) setEntries(data || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchEntries();
+    const channel = supabase
+      .channel("suivi-changes")
+      .on("postgres_changes", { event: "*", schema: "public", table: "ecritures_locatives" }, fetchEntries)
+      .subscribe();
+    return () => supabase.removeChannel(channel);
+  }, [fetchEntries]);
+
+  async function save(fields, id) {
+    const { error } = id
+      ? await supabase.from("ecritures_locatives").update(fields).eq("id", id)
+      : await supabase.from("ecritures_locatives").insert(fields);
+    if (error) { setError("Impossible d'enregistrer cette écriture."); return false; }
+    setError("");
+    return true;
+  }
+  async function remove(id) {
+    const { error } = await supabase.from("ecritures_locatives").delete().eq("id", id);
+    if (error) { setError("Impossible de supprimer cette écriture."); return false; }
+    setError("");
+    return true;
+  }
+
+  const filtered = filterBien ? entries.filter((e) => e.bien_id === filterBien) : entries;
+
+  const totalsByBien = useMemo(() => {
+    const m = {};
+    entries.forEach((e) => {
+      if (!m[e.bien_id]) m[e.bien_id] = { credit: 0, debit: 0 };
+      m[e.bien_id][e.type] += Number(e.amount);
+    });
+    return m;
+  }, [entries]);
+
+  if (loading) return <div className="p-8 text-sm text-stone-400">Chargement…</div>;
+
+  return (
+    <div className="max-w-5xl mx-auto p-5 sm:p-8 space-y-6">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="font-serif text-2xl text-blue-900 tracking-tight">Suivi des écritures</h1>
+          <p className="text-stone-500 text-sm mt-1">Loyers, charges, taxes et autres mouvements par bien.</p>
+        </div>
+        <button
+          onClick={() => setEditing(null)}
+          disabled={!biens.length}
+          className="flex items-center gap-1 text-xs font-medium bg-blue-900 text-white px-3 py-1.5 rounded-md hover:bg-blue-950 disabled:opacity-40"
+        >
+          <Plus size={14} /> Ajouter une écriture
+        </button>
+      </div>
+      {error && <div className="text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-md px-3 py-2">{error}</div>}
+
+      <div className="flex flex-col sm:flex-row gap-4">
+        <aside className="sm:w-64 shrink-0 space-y-1">
+          <button
+            onClick={() => setFilterBien(null)}
+            className={`w-full flex items-center justify-between text-left text-sm px-3 py-2 rounded-md ${filterBien === null ? "bg-blue-900 text-white" : "bg-white text-stone-700 hover:bg-stone-100 border border-stone-200"}`}
+          >
+            <span>Tous les biens</span>
+            <span className={filterBien === null ? "text-blue-100" : "text-stone-400"}>{entries.length}</span>
+          </button>
+          {biens.map((b) => {
+            const t = totalsByBien[b.id] || { credit: 0, debit: 0 };
+            const net = t.credit - t.debit;
+            return (
+              <button
+                key={b.id}
+                onClick={() => setFilterBien(b.id)}
+                className={`w-full text-left text-sm px-3 py-2 rounded-md ${filterBien === b.id ? "bg-blue-900 text-white" : "bg-white text-stone-700 hover:bg-stone-100 border border-stone-200"}`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="truncate">{b.name}</span>
+                </div>
+                <span className={`text-xs ${filterBien === b.id ? "text-blue-100" : net >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                  {formatEUR(net)} net
+                </span>
+              </button>
+            );
+          })}
+        </aside>
+
+        <div className="flex-1 min-w-0 bg-white rounded-lg border border-stone-200 overflow-x-auto">
+          {filtered.length === 0 ? (
+            <p className="text-sm text-stone-400 py-8 text-center">Aucune écriture.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-stone-400 border-b border-stone-100">
+                  <th className="px-4 py-2 font-medium">Date</th>
+                  <th className="px-4 py-2 font-medium">Bien</th>
+                  <th className="px-4 py-2 font-medium">Catégorie</th>
+                  <th className="px-4 py-2 font-medium">Libellé</th>
+                  <th className="px-4 py-2 font-medium text-right">Montant</th>
+                  <th className="px-4 py-2 font-medium w-10"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-stone-100">
+                {filtered.map((e) => {
+                  const isCredit = e.type === "credit";
+                  return (
+                    <tr key={e.id} onClick={() => setEditing(e)} className="cursor-pointer hover:bg-stone-50">
+                      <td className="px-4 py-2.5 text-stone-500 text-xs">{formatDateFR(e.date)}</td>
+                      <td className="px-4 py-2.5 text-stone-700">{bienById[e.bien_id]?.name || "—"}</td>
+                      <td className="px-4 py-2.5 text-stone-500 text-xs">{e.categorie}</td>
+                      <td className="px-4 py-2.5 text-stone-600">{e.label}</td>
+                      <td className={`px-4 py-2.5 text-right font-mono ${isCredit ? "text-emerald-700" : "text-rose-700"}`}>
+                        {isCredit ? "+" : "-"}{formatEUR(Number(e.amount))}
+                      </td>
+                      <td className="px-4 py-2.5 text-stone-300"><Pencil size={14} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      {editing !== undefined && (
+        <EcritureModal
+          entry={editing}
+          biens={biens}
+          baux={baux}
+          onCancel={() => setEditing(undefined)}
+          onSave={async (fields) => { const ok = await save(fields, editing?.id); if (ok) setEditing(undefined); }}
+          onDelete={editing ? async () => { const ok = await remove(editing.id); if (ok) setEditing(undefined); } : null}
+        />
+      )}
+    </div>
+  );
+}
+
+function EcritureModal({ entry, biens, baux, onCancel, onSave, onDelete }) {
+  const isNew = !entry;
+  const [bienId, setBienId] = useState(entry?.bien_id || biens[0]?.id || "");
+  const [bailId, setBailId] = useState(entry?.bail_id || "");
+  const [categorie, setCategorie] = useState(entry?.categorie || CATEGORIES_SUIVI[0]);
+  const [label, setLabel] = useState(entry?.label || "");
+  const [amount, setAmount] = useState(entry ? String(entry.amount) : "");
+  const [type, setType] = useState(entry?.type || "debit");
+  const [date, setDate] = useState(entry?.date || todayISO());
+  const [error, setError] = useState("");
+
+  const bauxForBien = baux.filter((b) => b.bien_id === bienId);
+
+  return (
+    <div className="fixed inset-0 bg-stone-900/40 flex items-center justify-center p-4 z-20">
+      <div className="bg-white rounded-lg border border-stone-200 p-4 space-y-3 w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between">
+          <h4 className="text-sm font-medium text-stone-700">{isNew ? "Nouvelle écriture" : "Modifier l'écriture"}</h4>
+          <button onClick={onCancel} className="text-stone-400 hover:text-stone-700" aria-label="Fermer"><X size={16} /></button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="sm:col-span-2">
+            <label className="text-xs text-stone-500 block mb-1">Bien</label>
+            <select value={bienId} onChange={(e) => { setBienId(e.target.value); setBailId(""); }} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+              {biens.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </div>
+          {bauxForBien.length > 0 && (
+            <div className="sm:col-span-2">
+              <label className="text-xs text-stone-500 block mb-1">Bail lié (optionnel)</label>
+              <select value={bailId} onChange={(e) => setBailId(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="">—</option>
+                {bauxForBien.map((b) => <option key={b.id} value={b.id}>Bail du {formatDateFR(b.date_debut)}{b.date_fin ? ` au ${formatDateFR(b.date_fin)}` : ""}</option>)}
+              </select>
+            </div>
+          )}
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Catégorie</label>
+            <select value={categorie} onChange={(e) => setCategorie(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+              {CATEGORIES_SUIVI.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Type</label>
+            <select value={type} onChange={(e) => setType(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="debit">Débit (dépense)</option>
+              <option value="credit">Crédit (recette)</option>
+            </select>
+          </div>
+          <div className="sm:col-span-2">
+            <label className="text-xs text-stone-500 block mb-1">Libellé</label>
+            <input value={label} onChange={(e) => setLabel(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Montant (€)</label>
+            <input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Date</label>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+        </div>
+        {error && <p className="text-xs text-rose-600">{error}</p>}
+        <div className="flex items-center justify-between pt-1">
+          {onDelete ? (
+            <button onClick={onDelete} className="flex items-center gap-1 text-xs text-rose-600 hover:text-rose-700 px-2 py-1.5"><Trash2 size={14} /> Supprimer</button>
+          ) : <span />}
+          <div className="flex gap-2">
+            <button onClick={onCancel} className="px-3 py-1.5 text-sm rounded-md border border-stone-300 hover:bg-stone-100">Annuler</button>
+            <button
+              onClick={() => {
+                const amt = parseFloat(amount);
+                if (!label.trim()) { setError("Entrez un libellé."); return; }
+                if (!(amt > 0)) { setError("Entrez un montant supérieur à 0."); return; }
+                if (!date) { setError("Entrez une date."); return; }
+                onSave({ bien_id: bienId, bail_id: bailId || null, categorie, label: label.trim(), amount: amt, type, date });
+              }}
+              className="px-3 py-1.5 text-sm rounded-md bg-blue-900 text-white hover:bg-blue-950"
+            >
+              Enregistrer
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- BAUX (CONTRATS) ---------------- */
 
-function generateContractPdf(bail, bien, locataire) {
-  const doc = new jsPDF();
-  const marginX = 20;
-  let y = 25;
+const BAILLEUR_DEFAULT = "Mme Virginie DENEUX & Mr Lionel DENEUX";
+const BAILLEUR_ADDRESS_DEFAULT = "543 route des Echets, 01700 Miribel, France";
 
+function pdfDoc() {
+  return new jsPDF();
+}
+
+function addTitle(doc, title, subtitle) {
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(16);
-  doc.text("CONTRAT DE LOCATION", 105, y, { align: "center" });
-  y += 12;
-
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.text("Entre les soussignés :", marginX, y);
-  y += 8;
-
-  doc.setFont("helvetica", "bold");
-  doc.text("Le Bailleur :", marginX, y);
-  doc.setFont("helvetica", "normal");
-  doc.text(bail.bailleur_nom || "________________________________", marginX + 28, y);
-  y += 8;
-
-  doc.setFont("helvetica", "bold");
-  doc.text("Le Locataire :", marginX, y);
-  doc.setFont("helvetica", "normal");
-  const civ = locataire.civilite ? `${locataire.civilite} ` : "";
-  doc.text(`${civ}${locataire.first_name} ${locataire.last_name}`, marginX + 28, y);
-  y += 6;
-  if (locataire.address) { doc.text(`Domicilié(e) : ${locataire.address}`, marginX + 28, y); y += 6; }
-  if (locataire.email || locataire.phone) {
-    doc.text(`Contact : ${locataire.email || "-"}  ${locataire.phone || ""}`, marginX + 28, y);
-    y += 6;
+  doc.setFontSize(14);
+  doc.text(title, 105, 20, { align: "center" });
+  if (subtitle) {
+    doc.setFontSize(11);
+    doc.text(subtitle, 105, 27, { align: "center" });
   }
-  y += 6;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.text(
+    "Soumis au titre Ier bis de la loi du 6 juillet 1989 tendant à améliorer les rapports locatifs",
+    105, 34, { align: "center" }
+  );
+  return 42;
+}
 
-  doc.text("Il a été convenu ce qui suit :", marginX, y);
-  y += 10;
+function makeSectionWriter(doc) {
+  let y = 42;
+  const marginX = 18;
+  const maxWidth = 174;
 
-  function article(title, lines) {
+  function ensureSpace(lines = 1) {
+    if (y + lines * 5 > 280) {
+      doc.addPage();
+      y = 20;
+    }
+  }
+  function heading(text) {
+    ensureSpace(2);
     doc.setFont("helvetica", "bold");
-    doc.text(title, marginX, y);
+    doc.setFontSize(11);
+    doc.text(text.toUpperCase(), marginX, y);
     y += 6;
-    doc.setFont("helvetica", "normal");
-    lines.forEach((line) => {
-      const split = doc.splitTextToSize(line, 170);
-      doc.text(split, marginX, y);
-      y += 6 * split.length;
-    });
-    y += 4;
+    doc.setDrawColor(200);
+    doc.line(marginX, y - 3, marginX + maxWidth, y - 3);
   }
+  function field(label, value) {
+    ensureSpace();
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9.5);
+    doc.text(`${label} :`, marginX, y);
+    doc.setFont("helvetica", "normal");
+    const labelWidth = doc.getTextWidth(`${label} : `);
+    const split = doc.splitTextToSize(String(value ?? ""), maxWidth - labelWidth);
+    doc.text(split, marginX + labelWidth, y);
+    y += 5 * split.length;
+  }
+  function paragraph(text) {
+    ensureSpace();
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9.5);
+    const split = doc.splitTextToSize(text, maxWidth);
+    split.forEach((line) => {
+      ensureSpace();
+      doc.text(line, marginX, y);
+      y += 5;
+    });
+  }
+  function bullet(text) {
+    ensureSpace();
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9.5);
+    const split = doc.splitTextToSize(text, maxWidth - 5);
+    doc.text("-", marginX, y);
+    doc.text(split, marginX + 4, y);
+    y += 5 * split.length;
+  }
+  function spacer(h = 3) {
+    y += h;
+  }
+  function getY() { return y; }
+  function setY(v) { y = v; }
 
-  article("Article 1 — Objet du contrat", [
-    `Le bailleur loue au locataire le bien désigné ci-après : ${bien.name}${bien.address ? `, situé ${bien.address}` : ""}.`,
-  ]);
+  return { heading, field, paragraph, bullet, spacer, getY, setY, marginX, maxWidth, doc };
+}
 
-  article("Article 2 — Durée", [
-    `Le présent contrat prend effet le ${formatDateFR(bail.date_debut)}` +
-      (bail.date_fin ? ` et se termine le ${formatDateFR(bail.date_fin)}.` : ", pour une durée indéterminée."),
-  ]);
+function locataireDisplayName(c) {
+  if (!c) return "________________________________";
+  if (c.societe) return `${c.societe}${c.first_name || c.last_name ? `, représentée par ${c.civilite ? `${c.civilite} ` : ""}${c.first_name} ${c.last_name}` : ""}`;
+  return `${c.civilite ? `${c.civilite} ` : ""}${c.first_name} ${c.last_name}`;
+}
 
-  const total = Number(bail.loyer_hors_charges || 0) + Number(bail.charges || 0);
-  article("Article 3 — Loyer et charges", [
-    `Le loyer mensuel hors charges est fixé à ${formatEUR(bail.loyer_hors_charges)}.`,
-    `Les charges mensuelles s'élèvent à ${formatEUR(bail.charges)}, soit un total mensuel de ${formatEUR(total)}.`,
-    `Le loyer est exigible le ${bail.jour_paiement} de chaque mois.`,
-  ]);
+function signatureBlock(w, y0) {
+  const { doc, marginX } = w;
+  w.setY(y0);
+  w.spacer(10);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text(`Fait à ________________________, le ${formatDateFR(todayISO())}, en 2 exemplaires.`, marginX, w.getY());
+  w.spacer(15);
+  doc.text("LE BAILLEUR", marginX, w.getY());
+  doc.text("LE LOCATAIRE", 120, w.getY());
+  doc.setFontSize(7.5);
+  doc.text('Signature précédée de "Lu et approuvé"', marginX, w.getY() + 5);
+  doc.text('Signature précédée de "Lu et approuvé"', 120, w.getY() + 5);
+}
 
-  article("Article 4 — Dépôt de garantie", [
-    `Un dépôt de garantie de ${formatEUR(bail.depot_garantie)} est versé par le locataire à la signature du présent contrat.`,
-  ]);
+/* -------- Modèle Garage (fidèle à "Bail location Garage") -------- */
+
+function generateGarageContractPdf(bail, bien, locataire) {
+  const doc = pdfDoc();
+  let y = addTitle(doc, "Contrat de Location", "Garage");
+  const w = makeSectionWriter(doc);
+  w.setY(y);
+
+  w.heading("Désignation des parties");
+  w.field("Le bailleur", bail.bailleur_nom || BAILLEUR_DEFAULT);
+  w.field("Adresse", BAILLEUR_ADDRESS_DEFAULT);
+  w.spacer(2);
+  w.field("Le locataire", locataireDisplayName(locataire));
+  if (locataire?.address) w.field("Adresse", locataire.address);
+  if (locataire?.phone) w.field("Téléphone", locataire.phone);
+  if (locataire?.email) w.field("Email", locataire.email);
+  w.spacer(2);
+  w.paragraph('Ensemble dénommés les « Parties ». Il a été convenu ce qui suit :');
+
+  w.spacer(3);
+  w.heading("Conditions financières");
+  w.field("Loyer hors charges", formatEUR(bail.loyer_hors_charges));
+  w.field("Provision sur charges", formatEUR(bail.charges));
+  w.field("Total mensuel", formatEUR(Number(bail.loyer_hors_charges) + Number(bail.charges)));
+  w.field("Dépôt de garantie", formatEUR(bail.depot_garantie));
+  w.field("Paiement", `d'avance, en totalité, le ${bail.jour_paiement} de chaque mois`);
+
+  w.spacer(3);
+  w.heading("Désignation des locaux");
+  w.field("Bien", bien.name);
+  if (bien.surface_m2) w.field("Surface", `${bien.surface_m2} m²`);
+  if (bien.address) w.field("Adresse", bien.address);
+  if (bien.complement_designation) w.field("Détails", bien.complement_designation);
+
+  w.spacer(3);
+  w.heading("Durée et renouvellement");
+  w.paragraph(
+    `Le présent bail est conclu pour une durée d'une année. Il prendra effet le ${formatDateFR(bail.date_debut)}` +
+    (bail.date_fin ? ` et se terminera le ${formatDateFR(bail.date_fin)}.` : `.`) +
+    " À défaut de résiliation donnée dans les formes prescrites par le présent bail, ce dernier sera ensuite renouvelé par tacite reconduction par période d'un an."
+  );
+
+  w.spacer(3);
+  w.heading("Charges et taxes");
+  w.paragraph(`Les charges et taxes sont payables d'avance et en totalité le ${bail.jour_paiement} de chaque mois, entre les mains du bailleur (versement RIB). Le montant de la taxe foncière est intégralement à la charge du propriétaire.`);
+
+  w.spacer(3);
+  w.heading("Dépôt de garantie");
+  w.paragraph(`Le preneur verse, à la signature du présent contrat, un dépôt de garantie de ${formatEUR(bail.depot_garantie)}, lequel ne sera pas productif d'intérêts. Ce dépôt sera remboursé à la fin de la location, après remise des équipements et déduction faite des éventuelles réparations locatives à effectuer.`);
+
+  w.spacer(3);
+  w.heading("Destination des locaux");
+  w.paragraph("Le garage, objet du présent contrat, est loué à des fins de stationnement ou de stockage de matériel. Toute autre utilisation ou toute sous-location nécessite l'accord écrit préalable du bailleur.");
+
+  w.spacer(3);
+  w.heading("Résiliation du contrat");
+  w.paragraph("Il peut être mis fin au présent contrat par l'une ou l'autre des parties, à tout moment, à la condition de respecter un délai de préavis d'1 mois. Le congé devra être notifié par lettre recommandée avec demande d'avis de réception.");
+
+  w.spacer(3);
+  w.heading("Obligations du locataire");
+  w.bullet("Payer le loyer et les charges aux termes convenus.");
+  w.bullet("Utiliser le garage conformément à sa destination (stockage, stationnement).");
+  w.bullet("Répondre des dégradations et pertes survenues durant la location.");
+  w.bullet("Entretenir le garage et restituer les équipements en fin de bail.");
+  w.bullet("Ne pas transformer le garage sans accord écrit du bailleur, ni le sous-louer.");
+
+  w.spacer(3);
+  w.heading("Clause résolutoire et clause pénale");
+  w.paragraph("Tout retard de paiement entraîne une majoration de 10% des sommes dues. Le bail sera résilié de plein droit 2 mois après un commandement de payer resté sans effet.");
 
   if (bail.notes) {
-    article("Article 5 — Conditions particulières", [bail.notes]);
+    w.spacer(3);
+    w.heading("Conditions particulières");
+    w.paragraph(bail.notes);
   }
 
-  y += 10;
-  doc.text(`Fait à ________________________, le ${formatDateFR(todayISO())}`, marginX, y);
-  y += 20;
-  doc.text("Le Bailleur", marginX, y);
-  doc.text("Le Locataire", 120, y);
-  y += 25;
-  doc.text("Signature :", marginX, y);
-  doc.text("Signature :", 120, y);
+  signatureBlock(w, w.getY() + 4);
 
-  doc.setFontSize(8);
-  doc.setTextColor(140);
-  const disclaimer = doc.splitTextToSize(
-    "Ce document est un récapitulatif des conditions convenues entre les parties. Il ne remplace pas un contrat de bail conforme à la réglementation en vigueur (notamment la loi du 6 juillet 1989 pour les locations vides). Il est recommandé de faire vérifier ce document par un professionnel avant signature.",
-    170
+  doc.save(`contrat-${bien.name.replace(/[^a-z0-9]/gi, "_")}-${(locataire?.last_name || locataire?.societe || "locataire").replace(/[^a-z0-9]/gi, "_")}.pdf`);
+}
+
+/* -------- Modèle Logement non meublé (fidèle à "Bail location non meublée") -------- */
+
+function generateResidentialContractPdf(bail, bien, locataire) {
+  const doc = pdfDoc();
+  let y = addTitle(doc, "Contrat de Location", "Logement non meublé");
+  const w = makeSectionWriter(doc);
+  w.setY(y);
+
+  w.heading("Désignation des parties");
+  w.field("Le bailleur", bail.bailleur_nom || BAILLEUR_DEFAULT);
+  w.field("Adresse", BAILLEUR_ADDRESS_DEFAULT);
+  w.spacer(2);
+  w.field("Le locataire", locataireDisplayName(locataire));
+  if (locataire?.address) w.field("Adresse", locataire.address);
+  if (locataire?.phone) w.field("Téléphone", locataire.phone);
+  if (locataire?.email) w.field("Email", locataire.email);
+  w.spacer(2);
+  w.paragraph('Ensemble dénommés les « Parties ». Il a été convenu ce qui suit :');
+
+  w.spacer(3);
+  w.heading("Conditions financières");
+  w.field("Loyer hors charges", formatEUR(bail.loyer_hors_charges));
+  w.field("Provision sur charges", formatEUR(bail.charges));
+  w.field("Total mensuel", formatEUR(Number(bail.loyer_hors_charges) + Number(bail.charges)));
+  w.field("Dépôt de garantie", formatEUR(bail.depot_garantie));
+
+  w.spacer(3);
+  w.heading("Désignation des locaux");
+  w.field("Bien", bien.name);
+  if (bien.surface_m2) w.field("Surface habitable", `${bien.surface_m2} m²`);
+  if (bien.address) w.field("Adresse", bien.address);
+  if (bien.complement_designation) w.field("Détails", bien.complement_designation);
+  w.paragraph("Loué à usage de résidence principale. Le locataire déclare parfaitement connaître les lieux pour les avoir vus et visités, et reconnaît qu'ils sont en bon état d'usage et d'entretien.");
+
+  w.spacer(3);
+  w.heading("Durée et renouvellement");
+  w.paragraph(
+    `Durée du contrat : 3 ans (6 ans si le bailleur est une personne morale), reconductible par tacite reconduction. ` +
+    `Date de départ du bail : ${formatDateFR(bail.date_debut)}.` +
+    (bail.date_fin ? ` Date de fin de bail : ${formatDateFR(bail.date_fin)}.` : "")
   );
-  doc.text(disclaimer, marginX, 280);
+  w.paragraph("Le locataire peut mettre fin au bail à tout moment après avoir donné congé. Le bailleur peut mettre fin au bail à son échéance, après avoir donné congé, pour reprendre le logement, le vendre, ou pour motif légitime et sérieux.");
 
-  doc.save(`contrat-${bien.name.replace(/[^a-z0-9]/gi, "_")}-${locataire.last_name}.pdf`);
+  w.spacer(3);
+  w.heading("Assurance multirisque habitation");
+  w.paragraph("Le locataire est tenu de s'assurer contre les risques locatifs et d'en justifier à la remise des clés puis chaque année à la demande du bailleur.");
+
+  w.spacer(3);
+  w.heading("Le loyer — révision");
+  w.paragraph(`Le loyer est payable d'avance le ${bail.jour_paiement} de chaque mois. Il sera indexé chaque année, à la date anniversaire du contrat, sur l'indice de référence des loyers (IRL).`);
+
+  w.spacer(3);
+  w.heading("Les charges");
+  w.paragraph("Le locataire s'oblige à acquitter les charges, prestations et impositions récupérables mises à sa charge, sous forme de provisions mensuelles régularisées chaque année conformément à l'article 23 de la loi du 6 juillet 1989.");
+
+  w.spacer(3);
+  w.heading("Dépôt de garantie");
+  w.paragraph(`Le locataire verse ce jour un dépôt de garantie de ${formatEUR(bail.depot_garantie)} (un mois de loyer hors charges). Il sera restitué sans intérêt en fin de bail, dans un délai d'1 mois si l'état des lieux de sortie est conforme, ou de 2 mois dans le cas contraire.`);
+
+  w.spacer(3);
+  w.heading("Résiliation du contrat");
+  w.paragraph("Par le locataire : à tout moment, moyennant un préavis de 3 mois (réduit à 1 mois dans certains cas prévus par la loi). Par le bailleur : à l'expiration du bail, moyennant un préavis de 6 mois. Le congé est notifié par lettre recommandée avec accusé de réception.");
+
+  w.spacer(3);
+  w.heading("Obligations des parties");
+  w.paragraph("Outre les obligations prévues par la loi du 6 juillet 1989, le bailleur délivre gratuitement une quittance au locataire sur demande. Le locataire doit laisser visiter les lieux en cas de congé ou de mise en vente, et ne peut sous-louer sans accord écrit préalable du bailleur.");
+
+  w.spacer(3);
+  w.heading("Clause de solidarité");
+  w.paragraph("En cas de pluralité de locataires, il y a solidarité et indivisibilité entre eux pour le paiement de toutes les sommes dues en application du présent bail.");
+
+  w.spacer(3);
+  w.heading("Clause résolutoire");
+  w.paragraph("À défaut de paiement du loyer, des charges, ou du dépôt de garantie, le bail sera résilié de plein droit 2 mois après un commandement de payer resté sans effet.");
+
+  w.spacer(3);
+  w.heading("Élection de domicile");
+  w.paragraph("Pour l'exécution des présentes, le bailleur fait élection de domicile en son domicile (ou celui de son mandataire), et le locataire dans les lieux loués.");
+
+  if (bail.notes) {
+    w.spacer(3);
+    w.heading("Conditions particulières");
+    w.paragraph(bail.notes);
+  }
+
+  w.spacer(3);
+  w.heading("Pièces annexées au contrat");
+  w.paragraph("État des lieux établi contradictoirement lors de la remise des clefs. Le cas échéant, acte de caution solidaire.");
+
+  signatureBlock(w, w.getY() + 4);
+
+  doc.save(`contrat-${bien.name.replace(/[^a-z0-9]/gi, "_")}-${(locataire?.last_name || locataire?.societe || "locataire").replace(/[^a-z0-9]/gi, "_")}.pdf`);
+}
+
+function generateContractPdf(bail, bien, locataire) {
+  if (bien.type === "garage" || bien.type === "parking") {
+    generateGarageContractPdf(bail, bien, locataire);
+  } else {
+    generateResidentialContractPdf(bail, bien, locataire);
+  }
 }
 
 function BauxTab({ baux, biens, contacts, bienById, contactById }) {
@@ -624,7 +1081,7 @@ function BauxTab({ baux, biens, contacts, bienById, contactById }) {
                 return (
                   <tr key={b.id} className="hover:bg-stone-50">
                     <td className="px-4 py-2.5 text-stone-800 cursor-pointer" onClick={() => setEditing(b)}>{bien?.name || "—"}</td>
-                    <td className="px-4 py-2.5 text-stone-600 cursor-pointer" onClick={() => setEditing(b)}>{loc ? `${loc.first_name} ${loc.last_name}` : "—"}</td>
+                    <td className="px-4 py-2.5 text-stone-600 cursor-pointer" onClick={() => setEditing(b)}>{loc ? (loc.societe || `${loc.first_name} ${loc.last_name}`) : "—"}</td>
                     <td className="px-4 py-2.5 text-right font-mono text-stone-700 cursor-pointer" onClick={() => setEditing(b)}>
                       {formatEUR(Number(b.loyer_hors_charges) + Number(b.charges))}
                     </td>
@@ -666,6 +1123,96 @@ function BauxTab({ baux, biens, contacts, bienById, contactById }) {
   );
 }
 
+function BailDocuments({ bailId }) {
+  const [docs, setDocs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [title, setTitle] = useState("");
+  const [docDate, setDocDate] = useState("");
+  const [file, setFile] = useState(null);
+  const [error, setError] = useState("");
+
+  const fetchDocs = useCallback(async () => {
+    const { data, error } = await supabase.from("bail_documents").select("*").eq("bail_id", bailId).order("document_date", { ascending: true });
+    if (!error) setDocs(data || []);
+    setLoading(false);
+  }, [bailId]);
+
+  useEffect(() => { fetchDocs(); }, [fetchDocs]);
+
+  async function handleUpload() {
+    if (!file) { setError("Choisis un fichier."); return; }
+    if (!title.trim()) { setError("Donne un titre au document."); return; }
+    setUploading(true);
+    setError("");
+    const path = `${bailId}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+    const { error: uploadError } = await supabase.storage.from("documents").upload(path, file);
+    if (uploadError) { setError("Échec de l'envoi du fichier."); setUploading(false); return; }
+    const { error: insertError } = await supabase.from("bail_documents").insert({
+      bail_id: bailId, title: title.trim(), document_date: docDate || null, storage_path: path,
+    });
+    setUploading(false);
+    if (insertError) { setError("Fichier envoyé mais impossible d'enregistrer la fiche."); return; }
+    setTitle(""); setDocDate(""); setFile(null);
+    fetchDocs();
+  }
+
+  async function handleDownload(doc) {
+    const { data, error } = await supabase.storage.from("documents").createSignedUrl(doc.storage_path, 60);
+    if (error || !data?.signedUrl) { setError("Impossible de générer le lien de téléchargement."); return; }
+    window.open(data.signedUrl, "_blank");
+  }
+
+  async function handleDeleteDoc(doc) {
+    await supabase.storage.from("documents").remove([doc.storage_path]);
+    await supabase.from("bail_documents").delete().eq("id", doc.id);
+    fetchDocs();
+  }
+
+  return (
+    <div className="border-t border-stone-100 pt-3">
+      <p className="text-xs font-medium text-stone-600 mb-2">Documents attachés (bail d'origine, avenants...)</p>
+      {loading ? (
+        <p className="text-xs text-stone-400">Chargement…</p>
+      ) : docs.length === 0 ? (
+        <p className="text-xs text-stone-400 mb-2">Aucun document pour l'instant.</p>
+      ) : (
+        <ul className="space-y-1.5 mb-3">
+          {docs.map((d) => (
+            <li key={d.id} className="flex items-center justify-between gap-2 text-xs bg-stone-50 border border-stone-200 rounded-md px-2.5 py-1.5">
+              <button onClick={() => handleDownload(d)} className="flex items-center gap-1.5 text-blue-800 hover:text-blue-950 min-w-0">
+                <Download size={12} />
+                <span className="truncate">{d.title}{d.document_date ? ` — ${formatDateFR(d.document_date)}` : ""}</span>
+              </button>
+              <button onClick={() => handleDeleteDoc(d)} className="text-stone-400 hover:text-rose-600 shrink-0" aria-label="Supprimer le document">
+                <Trash2 size={12} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex flex-wrap items-end gap-2">
+        <div>
+          <label className="text-[10px] text-stone-500 block mb-0.5">Titre</label>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Bail d'origine" className="px-2 py-1 rounded border border-stone-300 text-xs w-32 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+        <div>
+          <label className="text-[10px] text-stone-500 block mb-0.5">Date (optionnel)</label>
+          <input type="date" value={docDate} onChange={(e) => setDocDate(e.target.value)} className="px-2 py-1 rounded border border-stone-300 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+        <div>
+          <label className="text-[10px] text-stone-500 block mb-0.5">Fichier</label>
+          <input type="file" accept=".pdf,.doc,.docx" onChange={(e) => setFile(e.target.files?.[0] || null)} className="text-xs" />
+        </div>
+        <button onClick={handleUpload} disabled={uploading} className="px-2.5 py-1.5 text-xs rounded-md border border-blue-300 text-blue-800 hover:bg-blue-50 disabled:opacity-50">
+          {uploading ? "Envoi…" : "Ajouter"}
+        </button>
+      </div>
+      {error && <p className="text-[10px] text-rose-600 mt-1">{error}</p>}
+    </div>
+  );
+}
+
 function BailModal({ bail, biens, contacts, onCancel, onSave, onDelete }) {
   const isNew = !bail;
   const [bienId, setBienId] = useState(bail?.bien_id || biens[0]?.id || "");
@@ -698,7 +1245,7 @@ function BailModal({ bail, biens, contacts, onCancel, onSave, onDelete }) {
           <div>
             <label className="text-xs text-stone-500 block mb-1">Locataire</label>
             <select value={locataireId} onChange={(e) => setLocataireId(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-              {contacts.map((c) => <option key={c.id} value={c.id}>{c.first_name} {c.last_name}</option>)}
+              {contacts.map((c) => <option key={c.id} value={c.id}>{c.societe || `${c.first_name} ${c.last_name}`}</option>)}
             </select>
           </div>
           <div className="sm:col-span-2">
@@ -741,6 +1288,7 @@ function BailModal({ bail, biens, contacts, onCancel, onSave, onDelete }) {
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
         </div>
+        {!isNew && <BailDocuments bailId={bail.id} />}
         {error && <p className="text-xs text-rose-600">{error}</p>}
         <div className="flex items-center justify-between pt-1">
           {onDelete ? (
