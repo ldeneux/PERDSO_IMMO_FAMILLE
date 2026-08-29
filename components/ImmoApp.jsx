@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 import {
   Plus,
   Trash2,
@@ -732,47 +733,56 @@ function EcritureModal({ entry, biens, baux, onCancel, onSave, onDelete }) {
 
 const BAILLEUR_DEFAULT = "Mme Virginie DENEUX & Mr Lionel DENEUX";
 const BAILLEUR_ADDRESS_DEFAULT = "543 route des Echets, 01700 Miribel, France";
+const NAVY = [30, 41, 82];
+const NAVY_LIGHT = [230, 234, 244];
 
 function pdfDoc() {
   return new jsPDF();
 }
 
-function addTitle(doc, title, subtitle) {
+function addLetterhead(doc, title, subtitle) {
+  doc.setFillColor(...NAVY);
+  doc.rect(0, 0, 210, 26, "F");
+  doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(14);
-  doc.text(title, 105, 20, { align: "center" });
-  if (subtitle) {
-    doc.setFontSize(11);
-    doc.text(subtitle, 105, 27, { align: "center" });
-  }
+  doc.setFontSize(16);
+  doc.text(title, 105, 13, { align: "center" });
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
+  doc.setFontSize(11);
+  doc.text(subtitle, 105, 20, { align: "center" });
+  doc.setTextColor(0, 0, 0);
+  doc.setFontSize(7.5);
+  doc.setTextColor(120);
   doc.text(
     "Soumis au titre Ier bis de la loi du 6 juillet 1989 tendant à améliorer les rapports locatifs",
-    105, 34, { align: "center" }
+    105, 32, { align: "center" }
   );
-  return 42;
+  doc.setTextColor(0, 0, 0);
+  return 40;
 }
 
-function makeSectionWriter(doc) {
-  let y = 42;
+function makeSectionWriter(doc, startY) {
+  let y = startY;
   const marginX = 18;
   const maxWidth = 174;
+  const labelColWidth = 42;
 
   function ensureSpace(lines = 1) {
-    if (y + lines * 5 > 280) {
+    if (y + lines * 5 > 275) {
       doc.addPage();
       y = 20;
     }
   }
   function heading(text) {
     ensureSpace(2);
+    doc.setFillColor(...NAVY_LIGHT);
+    doc.rect(marginX, y - 4.5, maxWidth, 7, "F");
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
-    doc.text(text.toUpperCase(), marginX, y);
-    y += 6;
-    doc.setDrawColor(200);
-    doc.line(marginX, y - 3, marginX + maxWidth, y - 3);
+    doc.setFontSize(10);
+    doc.setTextColor(...NAVY);
+    doc.text(text.toUpperCase(), marginX + 2, y);
+    doc.setTextColor(0, 0, 0);
+    y += 8;
   }
   function field(label, value) {
     ensureSpace();
@@ -780,9 +790,8 @@ function makeSectionWriter(doc) {
     doc.setFontSize(9.5);
     doc.text(`${label} :`, marginX, y);
     doc.setFont("helvetica", "normal");
-    const labelWidth = doc.getTextWidth(`${label} : `);
-    const split = doc.splitTextToSize(String(value ?? ""), maxWidth - labelWidth);
-    doc.text(split, marginX + labelWidth, y);
+    const split = doc.splitTextToSize(String(value ?? ""), maxWidth - labelColWidth);
+    doc.text(split, marginX + labelColWidth, y);
     y += 5 * split.length;
   }
   function paragraph(text) {
@@ -801,17 +810,36 @@ function makeSectionWriter(doc) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9.5);
     const split = doc.splitTextToSize(text, maxWidth - 5);
-    doc.text("-", marginX, y);
+    doc.text("•", marginX, y);
     doc.text(split, marginX + 4, y);
     y += 5 * split.length;
   }
-  function spacer(h = 3) {
-    y += h;
+  function financeTable(rows) {
+    ensureSpace(rows.length + 2);
+    autoTable(doc, {
+      startY: y,
+      margin: { left: marginX, right: 18 },
+      tableWidth: maxWidth,
+      theme: "grid",
+      styles: { font: "helvetica", fontSize: 9.5, cellPadding: 2.2 },
+      headStyles: { fillColor: NAVY, textColor: 255 },
+      columnStyles: { 0: { cellWidth: 110 }, 1: { cellWidth: 64, halign: "right" } },
+      head: [["Montant des paiements", ""]],
+      body: rows,
+      didParseCell: (data) => {
+        if (data.row.raw[0] && String(data.row.raw[0]).startsWith("Total")) {
+          data.cell.styles.fontStyle = "bold";
+          data.cell.styles.fillColor = [245, 246, 250];
+        }
+      },
+    });
+    y = doc.lastAutoTable.finalY + 6;
   }
+  function spacer(h = 3) { y += h; }
   function getY() { return y; }
   function setY(v) { y = v; }
 
-  return { heading, field, paragraph, bullet, spacer, getY, setY, marginX, maxWidth, doc };
+  return { heading, field, paragraph, bullet, financeTable, spacer, getY, setY, marginX, maxWidth, doc };
 }
 
 function locataireDisplayName(c) {
@@ -823,25 +851,48 @@ function locataireDisplayName(c) {
 function signatureBlock(w, y0) {
   const { doc, marginX } = w;
   w.setY(y0);
-  w.spacer(10);
+  w.spacer(6);
+  if (w.getY() > 250) { doc.addPage(); w.setY(20); }
+  const y = w.getY();
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
-  doc.text(`Fait à ________________________, le ${formatDateFR(todayISO())}, en 2 exemplaires.`, marginX, w.getY());
-  w.spacer(15);
-  doc.text("LE BAILLEUR", marginX, w.getY());
-  doc.text("LE LOCATAIRE", 120, w.getY());
+  doc.text(`Fait à ________________________, le ${formatDateFR(todayISO())}, en 2 exemplaires.`, marginX, y);
+
+  const boxY = y + 6;
+  const boxW = 80, boxH = 32;
+  doc.setDrawColor(180);
+  doc.roundedRect(marginX, boxY, boxW, boxH, 1, 1);
+  doc.roundedRect(marginX + 94, boxY, boxW, boxH, 1, 1);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.text("LE BAILLEUR", marginX + 3, boxY + 6);
+  doc.text("LE LOCATAIRE", marginX + 97, boxY + 6);
+  doc.setFont("helvetica", "italic");
   doc.setFontSize(7.5);
-  doc.text('Signature précédée de "Lu et approuvé"', marginX, w.getY() + 5);
-  doc.text('Signature précédée de "Lu et approuvé"', 120, w.getY() + 5);
+  doc.text('Signature précédée de la mention', marginX + 3, boxY + 12);
+  doc.text('manuscrite « Lu et approuvé »', marginX + 3, boxY + 16);
+  doc.text('Signature précédée de la mention', marginX + 97, boxY + 12);
+  doc.text('manuscrite « Lu et approuvé »', marginX + 97, boxY + 16);
+}
+
+function addPageNumbers(doc) {
+  const total = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= total; i++) {
+    doc.setPage(i);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(150);
+    doc.text(`Page ${i} / ${total}`, 192, 290, { align: "right" });
+    doc.setTextColor(0, 0, 0);
+  }
 }
 
 /* -------- Modèle Garage (fidèle à "Bail location Garage") -------- */
 
 function generateGarageContractPdf(bail, bien, locataire) {
   const doc = pdfDoc();
-  let y = addTitle(doc, "Contrat de Location", "Garage");
-  const w = makeSectionWriter(doc);
-  w.setY(y);
+  const startY = addLetterhead(doc, "Contrat de Location", "Garage");
+  const w = makeSectionWriter(doc, startY);
 
   w.heading("Désignation des parties");
   w.field("Le bailleur", bail.bailleur_nom || BAILLEUR_DEFAULT);
@@ -854,13 +905,16 @@ function generateGarageContractPdf(bail, bien, locataire) {
   w.spacer(2);
   w.paragraph('Ensemble dénommés les « Parties ». Il a été convenu ce qui suit :');
 
-  w.spacer(3);
+  w.spacer(4);
   w.heading("Conditions financières");
-  w.field("Loyer hors charges", formatEUR(bail.loyer_hors_charges));
-  w.field("Provision sur charges", formatEUR(bail.charges));
-  w.field("Total mensuel", formatEUR(Number(bail.loyer_hors_charges) + Number(bail.charges)));
-  w.field("Dépôt de garantie", formatEUR(bail.depot_garantie));
-  w.field("Paiement", `d'avance, en totalité, le ${bail.jour_paiement} de chaque mois`);
+  const total = Number(bail.loyer_hors_charges) + Number(bail.charges);
+  w.financeTable([
+    ["Loyer hors charges", formatEUR(bail.loyer_hors_charges)],
+    ["Provision sur charges", formatEUR(bail.charges)],
+    ["Total mensuel", formatEUR(total)],
+    ["Dépôt de garantie", formatEUR(bail.depot_garantie)],
+  ]);
+  w.paragraph(`Paiement d'avance, en totalité, le ${bail.jour_paiement} de chaque mois, entre les mains du bailleur.`);
 
   w.spacer(3);
   w.heading("Désignation des locaux");
@@ -912,6 +966,7 @@ function generateGarageContractPdf(bail, bien, locataire) {
   }
 
   signatureBlock(w, w.getY() + 4);
+  addPageNumbers(doc);
 
   doc.save(`contrat-${bien.name.replace(/[^a-z0-9]/gi, "_")}-${(locataire?.last_name || locataire?.societe || "locataire").replace(/[^a-z0-9]/gi, "_")}.pdf`);
 }
@@ -920,9 +975,8 @@ function generateGarageContractPdf(bail, bien, locataire) {
 
 function generateResidentialContractPdf(bail, bien, locataire) {
   const doc = pdfDoc();
-  let y = addTitle(doc, "Contrat de Location", "Logement non meublé");
-  const w = makeSectionWriter(doc);
-  w.setY(y);
+  const startY = addLetterhead(doc, "Contrat de Location", "Logement non meublé");
+  const w = makeSectionWriter(doc, startY);
 
   w.heading("Désignation des parties");
   w.field("Le bailleur", bail.bailleur_nom || BAILLEUR_DEFAULT);
@@ -935,12 +989,15 @@ function generateResidentialContractPdf(bail, bien, locataire) {
   w.spacer(2);
   w.paragraph('Ensemble dénommés les « Parties ». Il a été convenu ce qui suit :');
 
-  w.spacer(3);
+  w.spacer(4);
   w.heading("Conditions financières");
-  w.field("Loyer hors charges", formatEUR(bail.loyer_hors_charges));
-  w.field("Provision sur charges", formatEUR(bail.charges));
-  w.field("Total mensuel", formatEUR(Number(bail.loyer_hors_charges) + Number(bail.charges)));
-  w.field("Dépôt de garantie", formatEUR(bail.depot_garantie));
+  const total = Number(bail.loyer_hors_charges) + Number(bail.charges);
+  w.financeTable([
+    ["Loyer hors charges", formatEUR(bail.loyer_hors_charges)],
+    ["Provision sur charges", formatEUR(bail.charges)],
+    ["Total mensuel", formatEUR(total)],
+    ["Dépôt de garantie", formatEUR(bail.depot_garantie)],
+  ]);
 
   w.spacer(3);
   w.heading("Désignation des locaux");
@@ -1006,6 +1063,7 @@ function generateResidentialContractPdf(bail, bien, locataire) {
   w.paragraph("État des lieux établi contradictoirement lors de la remise des clefs. Le cas échéant, acte de caution solidaire.");
 
   signatureBlock(w, w.getY() + 4);
+  addPageNumbers(doc);
 
   doc.save(`contrat-${bien.name.replace(/[^a-z0-9]/gi, "_")}-${(locataire?.last_name || locataire?.societe || "locataire").replace(/[^a-z0-9]/gi, "_")}.pdf`);
 }
@@ -1017,6 +1075,7 @@ function generateContractPdf(bail, bien, locataire) {
     generateResidentialContractPdf(bail, bien, locataire);
   }
 }
+
 
 function BauxTab({ baux, biens, contacts, bienById, contactById }) {
   const [editing, setEditing] = useState(undefined);
