@@ -216,7 +216,7 @@ function SyntheseTab({ biens }) {
   }, [bienEntries]);
 
   const acquisitionCost = bien
-    ? Number(bien.prix_achat || 0) + Number(bien.prix_notaire || 0) + Number(bien.prix_mobilier || 0)
+    ? Number(bien.montant_pret || 0) + Number(bien.apport || 0)
     : 0;
   const gainCoutPct = acquisitionCost > 0 ? (grandTotal / acquisitionCost) * 100 : null;
   const coutFinal = acquisitionCost - grandTotal;
@@ -318,7 +318,7 @@ function SyntheseTab({ biens }) {
                 <CoutLigne label="Mobilier" value={bien.prix_mobilier} />
                 <CoutLigne label="Apport" value={bien.apport} />
                 <CoutLigne label="Montant emprunté" value={bien.montant_pret} />
-                <CoutLigne label="Coût total (Immo + Notaire + Mobilier)" value={acquisitionCost} bold />
+                <CoutLigne label="Coût total (Emprunt + Apport — couvre immobilier, notaire, mobilier, intérêts)" value={acquisitionCost} bold />
               </div>
               <p className="text-[11px] text-stone-400 mt-3">Modifiable dans l'onglet Biens, fiche du bien.</p>
             </div>
