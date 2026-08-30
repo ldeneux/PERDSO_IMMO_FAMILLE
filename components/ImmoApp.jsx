@@ -157,7 +157,7 @@ export default function ImmoApp({ session }) {
         {activeTab === "synthese" && <SyntheseTab biens={biensLocatifs} />}
         {activeTab === "remboursements" && <RemboursementsTab biens={biens} bienById={bienById} />}
         {activeTab === "simulation-vente" && <SimulationVenteTab biens={biensLocatifs} />}
-        {activeTab === "simulation-lmnp" && <SimulationLmnpTab biens={biensLocatifs} baux={baux} />}
+        {activeTab === "simulation-lmnp" && <SimulationLmnpTab biens={biensLocatifs} />}
       </main>
     </div>
   );
@@ -597,10 +597,9 @@ function SimField({ label, value, onChange, type = "number", suffix }) {
 
 /* ---------------- SIMULATION LMNP ---------------- */
 
-function SimulationLmnpTab({ biens, baux }) {
+function SimulationLmnpTab({ biens }) {
   const [bienId, setBienId] = useState(biens[0]?.id || "");
   const bien = biens.find((b) => b.id === bienId);
-  const bail = baux.filter((b) => b.bien_id === bienId).sort((a, b) => (a.statut === "actif" ? -1 : 1))[0];
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -608,14 +607,12 @@ function SimulationLmnpTab({ biens, baux }) {
   const [valeurMobilier, setValeurMobilier] = useState("");
   const [dureeImmo, setDureeImmo] = useState("20");
   const [dureeMobilier, setDureeMobilier] = useState("10");
-  const [valeurBien, setValeurBien] = useState("");
+  const [tauxTheorique, setTauxTheorique] = useState("");
 
   useEffect(() => {
     if (bien) {
       setValeurImmo(bien.prix_achat != null ? String(bien.prix_achat) : "");
       setValeurMobilier(bien.prix_mobilier != null ? String(bien.prix_mobilier) : "");
-      const acquisitionCost = Number(bien.montant_pret || 0) + Number(bien.apport || 0);
-      setValeurBien(acquisitionCost > 0 ? String(acquisitionCost) : (bien.prix_achat != null ? String(bien.prix_achat) : ""));
     }
   }, [bienId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -632,8 +629,8 @@ function SimulationLmnpTab({ biens, baux }) {
   const dotationMobilier = n(dureeMobilier) > 0 ? n(valeurMobilier) / n(dureeMobilier) : 0;
   const amortissementDispoAnnuel = dotationImmo + dotationMobilier;
 
-  const loyerGarantiAnnuel = bail ? Number(bail.loyer_hors_charges) * 12 : 0;
-  const rendementTheorique = n(valeurBien) > 0 ? (loyerGarantiAnnuel / n(valeurBien)) * 100 : null;
+  const valeurBien = n(valeurImmo) + n(valeurMobilier);
+  const loyerEstime = valeurBien * (n(tauxTheorique) / 100);
 
   const bienEntries = entries.filter((e) => e.bien_id === bienId);
   const years = Array.from(new Set(bienEntries.map((e) => e.date.slice(0, 4)))).sort();
@@ -648,7 +645,7 @@ function SimulationLmnpTab({ biens, baux }) {
       const amortissementDeduit = Math.max(0, Math.min(resultatAvant, amortissementDispo));
       report = amortissementDispo - amortissementDeduit;
       const resultatNet = Math.max(0, resultatAvant - amortissementDeduit);
-      const rendementReel = n(valeurBien) > 0 ? (resultatAvant / n(valeurBien)) * 100 : null;
+      const rendementReel = valeurBien > 0 ? (resultatAvant / valeurBien) * 100 : null;
       return { year: y, revenus, charges, resultatAvant, amortissementDeduit, reportCumule: report, resultatNet, rendementReel };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -664,7 +661,7 @@ function SimulationLmnpTab({ biens, baux }) {
     <div className="max-w-5xl mx-auto p-5 sm:p-8 space-y-6">
       <div>
         <h1 className="font-serif text-2xl text-blue-900 tracking-tight">Simulation LMNP</h1>
-        <p className="text-stone-500 text-sm mt-1">Amortissement comptable (régime réel) vs revenus/charges réels du Suivi.</p>
+        <p className="text-stone-500 text-sm mt-1">Amortissement comptable (régime réel) vs revenus/charges réels du Suivi. Sert aussi à étudier un futur achat.</p>
         <p className="text-xs text-stone-400 mt-1">L'amortissement ne peut jamais créer de déficit fiscal : l'excédent non utilisé une année est reporté indéfiniment sur les années suivantes.</p>
       </div>
 
@@ -676,18 +673,28 @@ function SimulationLmnpTab({ biens, baux }) {
       </div>
 
       <div className="bg-white rounded-lg border border-stone-200 p-4 grid grid-cols-1 sm:grid-cols-4 gap-3">
-        <SimField label="Valeur du bien pour le calcul de rentabilité (€)" value={valeurBien} onChange={setValeurBien} />
         <SimField label="Valeur immobilier amortissable (€)" value={valeurImmo} onChange={setValeurImmo} />
         <SimField label="Durée amortissement immo (ans)" value={dureeImmo} onChange={setDureeImmo} />
         <SimField label="Valeur mobilier (€)" value={valeurMobilier} onChange={setValeurMobilier} />
         <SimField label="Durée amortissement mobilier (ans)" value={dureeMobilier} onChange={setDureeMobilier} />
       </div>
-      <p className="text-xs text-stone-500">Dotation annuelle disponible : {formatEUR(amortissementDispoAnnuel)} ({formatEUR(dotationImmo)} immobilier + {formatEUR(dotationMobilier)} mobilier)</p>
+      <p className="text-xs text-stone-500">
+        Dotation annuelle disponible : {formatEUR(amortissementDispoAnnuel)} ({formatEUR(dotationImmo)} immobilier + {formatEUR(dotationMobilier)} mobilier) ·
+        Valeur du bien (base des rendements) : {formatEUR(valeurBien)}
+      </p>
+
+      <div className="bg-white rounded-lg border border-stone-200 p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <SimField label="Rendement théorique saisi (%)" value={tauxTheorique} onChange={setTauxTheorique} suffix="%" />
+        <div>
+          <p className="text-xs text-stone-500 mb-1">Loyer estimé correspondant</p>
+          <p className="font-mono text-sm text-stone-700 py-1.5">{formatEUR(loyerEstime)} / an</p>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <SyntheseMetric
-          label={`Rendement théorique (loyer garanti${bail ? ` : ${formatEUR(loyerGarantiAnnuel)}/an` : ", aucun bail actif"})`}
-          value={rendementTheorique != null ? `${rendementTheorique.toFixed(1)} % / an` : "—"}
+          label="Rendement théorique (saisi)"
+          value={tauxTheorique ? `${n(tauxTheorique).toFixed(1)} % / an` : "—"}
           tone="sky"
         />
         <SyntheseMetric
