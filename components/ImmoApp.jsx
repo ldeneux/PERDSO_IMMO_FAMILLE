@@ -143,7 +143,7 @@ export default function ImmoApp({ session }) {
         {activeTab === "contacts" && <ContactsTab contacts={contacts} baux={baux} />}
         {activeTab === "biens" && <BiensTab biens={biens} baux={baux} />}
         {activeTab === "baux" && <BauxTab baux={baux} biens={biens} contacts={contacts} bienById={bienById} contactById={contactById} />}
-        {activeTab === "suivi" && <SuiviTab biens={biens} baux={baux} bienById={bienById} />}
+        {activeTab === "suivi" && <SuiviTab biens={biens} baux={baux} contacts={contacts} bienById={bienById} />}
         {activeTab === "synthese" && <SyntheseTab biens={biens} />}
       </main>
     </div>
@@ -349,9 +349,56 @@ function CoutLigne({ label, value, bold }) {
 
 /* ---------------- CONTACTS ---------------- */
 
+function useSortSearch(list, getters, defaultKey) {
+  const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState(defaultKey);
+  const [sortDir, setSortDir] = useState("asc");
+  function handleSort(key) {
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(key); setSortDir("asc"); }
+  }
+  const visible = useMemo(() => {
+    let out = list;
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      out = out.filter((item) => Object.values(getters).some((g) => String(g(item) ?? "").toLowerCase().includes(q)));
+    }
+    const dir = sortDir === "asc" ? 1 : -1;
+    const getter = getters[sortKey];
+    return [...out].sort((a, b) => {
+      const av = getter ? getter(a) : "";
+      const bv = getter ? getter(b) : "";
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return 0;
+    });
+  }, [list, search, sortKey, sortDir, getters]);
+  return { search, setSearch, sortKey, sortDir, handleSort, visible };
+}
+
+function SortableTh({ label, sortKeyName, sortKey, sortDir, onSort, align, className = "" }) {
+  const active = sortKey === sortKeyName;
+  return (
+    <th
+      onClick={() => onSort(sortKeyName)}
+      className={`px-4 py-2 font-medium cursor-pointer select-none hover:text-stone-700 ${align === "right" ? "text-right" : "text-left"} ${className}`}
+    >
+      {label} {active ? (sortDir === "asc" ? "▲" : "▼") : ""}
+    </th>
+  );
+}
+
 function ContactsTab({ contacts }) {
   const [editing, setEditing] = useState(undefined);
   const [error, setError] = useState("");
+
+  const getters = useMemo(() => ({
+    nom: (c) => c.societe || `${c.last_name} ${c.first_name}`,
+    type: (c) => c.type,
+    email: (c) => c.email,
+    phone: (c) => c.phone,
+  }), []);
+  const { search, setSearch, sortKey, sortDir, handleSort, visible } = useSortSearch(contacts, getters, "nom");
 
   async function save(fields, id) {
     const { error } = id
@@ -380,23 +427,29 @@ function ContactsTab({ contacts }) {
         </button>
       </div>
       {error && <div className="text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-md px-3 py-2">{error}</div>}
+      <input
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Rechercher un contact..."
+        className="w-full px-3 py-1.5 rounded-md border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+      />
 
       <div className="bg-white rounded-lg border border-stone-200 overflow-x-auto">
-        {contacts.length === 0 ? (
-          <p className="text-sm text-stone-400 py-8 text-center">Aucun contact pour l'instant.</p>
+        {visible.length === 0 ? (
+          <p className="text-sm text-stone-400 py-8 text-center">Aucun contact.</p>
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-stone-400 border-b border-stone-100">
-                <th className="px-4 py-2 font-medium">Nom</th>
-                <th className="px-4 py-2 font-medium">Type</th>
-                <th className="px-4 py-2 font-medium">Email</th>
-                <th className="px-4 py-2 font-medium">Téléphone</th>
+                <SortableTh label="Nom" sortKeyName="nom" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                <SortableTh label="Type" sortKeyName="type" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                <SortableTh label="Email" sortKeyName="email" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                <SortableTh label="Téléphone" sortKeyName="phone" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                 <th className="px-4 py-2 font-medium w-10"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-100">
-              {contacts.map((c) => (
+              {visible.map((c) => (
                 <tr key={c.id} onClick={() => setEditing(c)} className="cursor-pointer hover:bg-stone-50">
                   <td className="px-4 py-2.5 text-stone-800">{c.societe ? c.societe : `${c.civilite ? `${c.civilite} ` : ""}${c.first_name} ${c.last_name}`}</td>
                   <td className="px-4 py-2.5 text-stone-500 capitalize">{c.type}</td>
@@ -709,12 +762,15 @@ function BienModal({ bien, onCancel, onSave, onDelete }) {
 
 const CATEGORIES_SUIVI = ["Loyer", "Variable", "Charges", "Taxe Foncière", "Assurance", "Compta", "TVA", "Impot", "Caution", "Divers"];
 
-function SuiviTab({ biens, baux, bienById }) {
+function SuiviTab({ biens, baux, contacts, bienById }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterBien, setFilterBien] = useState(null);
   const [editing, setEditing] = useState(undefined);
   const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState("date");
+  const [sortDir, setSortDir] = useState("desc");
 
   const fetchEntries = useCallback(async () => {
     const { data, error } = await supabase.from("ecritures_locatives").select("*").order("date", { ascending: false });
@@ -746,7 +802,20 @@ function SuiviTab({ biens, baux, bienById }) {
     return true;
   }
 
-  const filtered = filterBien ? entries.filter((e) => e.bien_id === filterBien) : entries;
+  function bailAndLocataireFor(entry) {
+    let bail = entry.bail_id ? baux.find((b) => b.id === entry.bail_id) : null;
+    if (!bail) {
+      const candidates = baux.filter((b) => b.bien_id === entry.bien_id);
+      bail = candidates.find((b) => entry.date >= b.date_debut && (!b.date_fin || entry.date <= b.date_fin)) || candidates[0] || null;
+    }
+    const locataire = bail ? contacts.find((c) => c.id === bail.locataire_id) : null;
+    return { bail, locataire };
+  }
+
+  function handleSort(key) {
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(key); setSortDir("asc"); }
+  }
 
   const totalsByBien = useMemo(() => {
     const m = {};
@@ -757,10 +826,50 @@ function SuiviTab({ biens, baux, bienById }) {
     return m;
   }, [entries]);
 
+  const visible = useMemo(() => {
+    let list = filterBien ? entries.filter((e) => e.bien_id === filterBien) : entries;
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      list = list.filter((e) =>
+        e.label.toLowerCase().includes(q) ||
+        e.categorie.toLowerCase().includes(q) ||
+        (bienById[e.bien_id]?.name || "").toLowerCase().includes(q) ||
+        (e.reference_paiement || "").toLowerCase().includes(q)
+      );
+    }
+    const dir = sortDir === "asc" ? 1 : -1;
+    return [...list].sort((a, b) => {
+      let av, bv;
+      switch (sortKey) {
+        case "bien": av = bienById[a.bien_id]?.name || ""; bv = bienById[b.bien_id]?.name || ""; break;
+        case "categorie": av = a.categorie; bv = b.categorie; break;
+        case "label": av = a.label; bv = b.label; break;
+        case "amount": av = Number(a.amount) * (a.type === "credit" ? 1 : -1); bv = Number(b.amount) * (b.type === "credit" ? 1 : -1); break;
+        case "reference": av = a.reference_paiement || ""; bv = b.reference_paiement || ""; break;
+        default: av = a.date; bv = b.date;
+      }
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return 0;
+    });
+  }, [entries, filterBien, search, sortKey, sortDir, bienById]);
+
   if (loading) return <div className="p-8 text-sm text-stone-400">Chargement…</div>;
 
+  function SortableTh({ label, sortKeyName, align }) {
+    const active = sortKey === sortKeyName;
+    return (
+      <th
+        onClick={() => handleSort(sortKeyName)}
+        className={`px-4 py-2 font-medium cursor-pointer select-none hover:text-stone-700 ${align === "right" ? "text-right" : "text-left"}`}
+      >
+        {label} {active ? (sortDir === "asc" ? "▲" : "▼") : ""}
+      </th>
+    );
+  }
+
   return (
-    <div className="max-w-5xl mx-auto p-5 sm:p-8 space-y-6">
+    <div className="max-w-6xl mx-auto p-5 sm:p-8 space-y-6">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="font-serif text-2xl text-blue-900 tracking-tight">Suivi des écritures</h1>
@@ -805,40 +914,72 @@ function SuiviTab({ biens, baux, bienById }) {
           })}
         </aside>
 
-        <div className="flex-1 min-w-0 bg-white rounded-lg border border-stone-200 overflow-x-auto">
-          {filtered.length === 0 ? (
-            <p className="text-sm text-stone-400 py-8 text-center">Aucune écriture.</p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-stone-400 border-b border-stone-100">
-                  <th className="px-4 py-2 font-medium">Date</th>
-                  <th className="px-4 py-2 font-medium">Bien</th>
-                  <th className="px-4 py-2 font-medium">Catégorie</th>
-                  <th className="px-4 py-2 font-medium">Libellé</th>
-                  <th className="px-4 py-2 font-medium text-right">Montant</th>
-                  <th className="px-4 py-2 font-medium w-10"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-stone-100">
-                {filtered.map((e) => {
-                  const isCredit = e.type === "credit";
-                  return (
-                    <tr key={e.id} onClick={() => setEditing(e)} className="cursor-pointer hover:bg-stone-50">
-                      <td className="px-4 py-2.5 text-stone-500 text-xs">{formatDateFR(e.date)}</td>
-                      <td className="px-4 py-2.5 text-stone-700">{bienById[e.bien_id]?.name || "—"}</td>
-                      <td className="px-4 py-2.5 text-stone-500 text-xs">{e.categorie}</td>
-                      <td className="px-4 py-2.5 text-stone-600">{e.label}</td>
-                      <td className={`px-4 py-2.5 text-right font-mono ${isCredit ? "text-emerald-700" : "text-rose-700"}`}>
-                        {isCredit ? "+" : "-"}{formatEUR(Number(e.amount))}
-                      </td>
-                      <td className="px-4 py-2.5 text-stone-300"><Pencil size={14} /></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
+        <div className="flex-1 min-w-0 space-y-2">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Rechercher (libellé, catégorie, bien, référence...)"
+            className="w-full px-3 py-1.5 rounded-md border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <div className="bg-white rounded-lg border border-stone-200 overflow-x-auto">
+            {visible.length === 0 ? (
+              <p className="text-sm text-stone-400 py-8 text-center">Aucune écriture.</p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-stone-400 border-b border-stone-100">
+                    <SortableTh label="Date" sortKeyName="date" />
+                    <SortableTh label="Bien" sortKeyName="bien" />
+                    <SortableTh label="Catégorie" sortKeyName="categorie" />
+                    <SortableTh label="Libellé" sortKeyName="label" />
+                    <SortableTh label="Réf. paiement" sortKeyName="reference" />
+                    <SortableTh label="Montant" sortKeyName="amount" align="right" />
+                    <th className="px-4 py-2 font-medium w-24">Document</th>
+                    <th className="px-4 py-2 font-medium w-10"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-100">
+                  {visible.map((e) => {
+                    const isCredit = e.type === "credit";
+                    const { bail, locataire } = bailAndLocataireFor(e);
+                    const bien = bienById[e.bien_id];
+                    const canDoc = bien && (e.categorie === "Loyer" || e.categorie === "Variable" || e.categorie === "Caution");
+                    const isPaid = !!(e.reference_paiement && e.date_paiement);
+                    return (
+                      <tr key={e.id} className="hover:bg-stone-50">
+                        <td className="px-4 py-2.5 text-stone-500 text-xs cursor-pointer" onClick={() => setEditing(e)}>{formatDateFR(e.date)}</td>
+                        <td className="px-4 py-2.5 text-stone-700 cursor-pointer" onClick={() => setEditing(e)}>{bien?.name || "—"}</td>
+                        <td className="px-4 py-2.5 text-stone-500 text-xs cursor-pointer" onClick={() => setEditing(e)}>{e.categorie}</td>
+                        <td className="px-4 py-2.5 text-stone-600 cursor-pointer" onClick={() => setEditing(e)}>{e.label}</td>
+                        <td className="px-4 py-2.5 text-stone-400 text-xs cursor-pointer" onClick={() => setEditing(e)}>{e.reference_paiement || "—"}</td>
+                        <td className={`px-4 py-2.5 text-right font-mono cursor-pointer ${isCredit ? "text-emerald-700" : "text-rose-700"}`} onClick={() => setEditing(e)}>
+                          {isCredit ? "+" : "-"}{formatEUR(Number(e.amount))}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          {canDoc && (
+                            <button
+                              onClick={() =>
+                                e.categorie === "Caution"
+                                  ? generateCautionReceiptPdf(e, bien, bail, locataire)
+                                  : isPaid
+                                  ? generateQuittancePdf(e, bien, bail, locataire)
+                                  : generateAvisEcheancePdf(e, bien, bail, locataire)
+                              }
+                              className="flex items-center gap-1 text-xs text-blue-800 hover:text-blue-950"
+                            >
+                              <Download size={12} />
+                              {e.categorie === "Caution" ? "Reçu" : isPaid ? "Quittance" : "Avis"}
+                            </button>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 text-stone-300 cursor-pointer" onClick={() => setEditing(e)}><Pencil size={14} /></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
       </div>
 
@@ -865,6 +1006,8 @@ function EcritureModal({ entry, biens, baux, onCancel, onSave, onDelete }) {
   const [amount, setAmount] = useState(entry ? String(entry.amount) : "");
   const [type, setType] = useState(entry?.type || "debit");
   const [date, setDate] = useState(entry?.date || todayISO());
+  const [referencePaiement, setReferencePaiement] = useState(entry?.reference_paiement || "");
+  const [datePaiement, setDatePaiement] = useState(entry?.date_paiement || "");
   const [error, setError] = useState("");
 
   const bauxForBien = baux.filter((b) => b.bien_id === bienId);
@@ -914,8 +1057,19 @@ function EcritureModal({ entry, biens, baux, onCancel, onSave, onDelete }) {
             <input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
-            <label className="text-xs text-stone-500 block mb-1">Date</label>
+            <label className="text-xs text-stone-500 block mb-1">Date (terme / échéance)</label>
             <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div className="sm:col-span-2 pt-2 border-t border-stone-100">
+            <p className="text-xs font-medium text-stone-600 mb-2">Paiement (pour la quittance)</p>
+          </div>
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Référence de paiement</label>
+            <input value={referencePaiement} onChange={(e) => setReferencePaiement(e.target.value)} placeholder="VH11503GERARC601" className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Date de paiement</label>
+            <input type="date" value={datePaiement} onChange={(e) => setDatePaiement(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
         </div>
         {error && <p className="text-xs text-rose-600">{error}</p>}
@@ -931,7 +1085,7 @@ function EcritureModal({ entry, biens, baux, onCancel, onSave, onDelete }) {
                 if (!label.trim()) { setError("Entrez un libellé."); return; }
                 if (!(amt > 0)) { setError("Entrez un montant supérieur à 0."); return; }
                 if (!date) { setError("Entrez une date."); return; }
-                onSave({ bien_id: bienId, bail_id: bailId || null, categorie, label: label.trim(), amount: amt, type, date });
+                onSave({ bien_id: bienId, bail_id: bailId || null, categorie, label: label.trim(), amount: amt, type, date, reference_paiement: referencePaiement.trim() || null, date_paiement: datePaiement || null });
               }}
               className="px-3 py-1.5 text-sm rounded-md bg-blue-900 text-white hover:bg-blue-950"
             >
@@ -946,7 +1100,7 @@ function EcritureModal({ entry, biens, baux, onCancel, onSave, onDelete }) {
 
 /* ---------------- BAUX (CONTRATS) ---------------- */
 
-const BAILLEUR_DEFAULT = "Mme Virginie DENEUX & Mr Lionel DENEUX";
+const BAILLEUR_DEFAULT = "Mme MAIELLARO-DENEUX Virginie";
 const BAILLEUR_ADDRESS_DEFAULT = "543 route des Echets, 01700 Miribel, France";
 const NAVY = [30, 41, 82];
 const NAVY_LIGHT = [230, 234, 244];
@@ -1291,10 +1445,141 @@ function generateContractPdf(bail, bien, locataire) {
   }
 }
 
+/* -------- Avis d'échéance / Quittance / Reçu de caution -------- */
+
+const MOIS_NOMS = [
+  "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
+  "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre",
+];
+function periodeLabel(dateStr) {
+  const [y, m] = dateStr.split("-").map(Number);
+  return `${MOIS_NOMS[m - 1]} ${y}`.toUpperCase();
+}
+
+function partiesBlock(w, bail, bien, locataire) {
+  w.field("Bailleur", bail?.bailleur_nom || BAILLEUR_DEFAULT);
+  w.field("Adresse bailleur", BAILLEUR_ADDRESS_DEFAULT);
+  w.spacer(2);
+  w.field("Locataire / Destinataire", locataireDisplayName(locataire));
+  if (locataire?.address) w.field("Adresse", locataire.address);
+  w.spacer(3);
+  w.heading("Locaux concernés");
+  w.field("Bien", bien.name);
+  if (bien.address) w.field("Adresse", bien.address);
+}
+
+function detailLoyerRows(entry, bail) {
+  if (bail && (Number(bail.loyer_hors_charges) > 0 || Number(bail.charges) > 0)) {
+    const total = Number(bail.loyer_hors_charges) + Number(bail.charges);
+    return [
+      ["Loyer nu", formatEUR(bail.loyer_hors_charges)],
+      ["Charges / provisions de charges", formatEUR(bail.charges)],
+      ["Montant total du terme", formatEUR(total)],
+    ];
+  }
+  return [["Montant total du terme", formatEUR(entry.amount)]];
+}
+
+function generateAvisEcheancePdf(entry, bien, bail, locataire) {
+  const doc = pdfDoc();
+  const startY = addLetterhead(doc, "Avis d'échéance de loyer", periodeLabel(entry.date));
+  const w = makeSectionWriter(doc, startY);
+
+  w.heading("Désignation des parties");
+  partiesBlock(w, bail, bien, locataire);
+
+  w.spacer(4);
+  w.heading("Somme à payer");
+  w.paragraph(`Au premier jour de la période de : ${periodeLabel(entry.date)}${bail ? `, soit le ${bail.jour_paiement} du mois` : ""}.`);
+  w.financeTable(detailLoyerRows(entry, bail));
+
+  w.spacer(4);
+  doc.setFont("helvetica", "italic");
+  doc.setFontSize(8.5);
+  doc.text("Cet avis ne peut en aucun cas faire office de quittance.", w.marginX, w.getY());
+  w.spacer(8);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text(`Fait à Lyon, le ${formatDateFR(todayISO())}`, w.marginX, w.getY());
+
+  addPageNumbers(doc);
+  doc.save(`avis-echeance-${bien.name.replace(/[^a-z0-9]/gi, "_")}-${entry.date}.pdf`);
+}
+
+function generateQuittancePdf(entry, bien, bail, locataire) {
+  const doc = pdfDoc();
+  const startY = addLetterhead(doc, "Quittance de loyer", periodeLabel(entry.date));
+  const w = makeSectionWriter(doc, startY);
+
+  w.heading("Désignation des parties");
+  partiesBlock(w, bail, bien, locataire);
+
+  w.spacer(4);
+  w.heading("Règlement reçu");
+  const paiementTxt = entry.reference_paiement
+    ? `La somme de ${formatEUR(entry.amount)} a été reçue par virement bancaire, référence ${entry.reference_paiement}${entry.date_paiement ? `, le ${formatDateFR(entry.date_paiement)}` : ""}.`
+    : `La somme de ${formatEUR(entry.amount)} a été reçue en règlement du terme ci-dessous.`;
+  w.paragraph(paiementTxt);
+  w.paragraph(`En paiement du terme de : ${periodeLabel(entry.date)}.`);
+  w.financeTable(detailLoyerRows(entry, bail));
+
+  w.spacer(4);
+  doc.setFont("helvetica", "italic");
+  doc.setFontSize(8);
+  doc.setTextColor(110);
+  const disclaimer = doc.splitTextToSize(
+    "Le paiement de la présente n'emporte pas présomption de paiement des termes antérieurs. Cette quittance annule tous les reçus qui auraient pu être donnés pour acompte versé sur le présent terme. En cas de congé précédemment donné, cette quittance représenterait l'indemnité d'occupation et ne saurait être considérée comme un titre d'occupation. Sous réserve d'encaissement.",
+    w.maxWidth
+  );
+  doc.text(disclaimer, w.marginX, w.getY());
+  doc.setTextColor(0, 0, 0);
+  w.setY(w.getY() + 5 * disclaimer.length + 6);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text(`Fait à Lyon, le ${formatDateFR(entry.date_paiement || todayISO())}`, w.marginX, w.getY());
+
+  addPageNumbers(doc);
+  doc.save(`quittance-${bien.name.replace(/[^a-z0-9]/gi, "_")}-${entry.date}.pdf`);
+}
+
+function generateCautionReceiptPdf(entry, bien, bail, locataire) {
+  const doc = pdfDoc();
+  const startY = addLetterhead(doc, "Reçu de dépôt de garantie", bien.name);
+  const w = makeSectionWriter(doc, startY);
+
+  w.heading("Désignation des parties");
+  partiesBlock(w, bail, bien, locataire);
+
+  w.spacer(4);
+  w.heading("Dépôt reçu");
+  const paiementTxt = entry.reference_paiement
+    ? `La somme de ${formatEUR(entry.amount)} a été reçue par virement bancaire, référence ${entry.reference_paiement}${entry.date_paiement ? `, le ${formatDateFR(entry.date_paiement)}` : ""}.`
+    : `La somme de ${formatEUR(entry.amount)} a été reçue au titre du dépôt de garantie.`;
+  w.paragraph(paiementTxt);
+  w.paragraph("Le dépôt de garantie ne produit pas d'intérêts. Il sera remboursé, lorsqu'il sera payable, minoré des éventuelles retenues prévues au contrat de bail, dans les conditions et délais fixés par la réglementation en vigueur.");
+
+  w.spacer(6);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text(`Fait à Lyon, le ${formatDateFR(entry.date_paiement || todayISO())}`, w.marginX, w.getY());
+
+  addPageNumbers(doc);
+  doc.save(`recu-caution-${bien.name.replace(/[^a-z0-9]/gi, "_")}-${entry.date}.pdf`);
+}
+
 
 function BauxTab({ baux, biens, contacts, bienById, contactById }) {
   const [editing, setEditing] = useState(undefined);
   const [error, setError] = useState("");
+
+  const getters = useMemo(() => ({
+    bien: (b) => bienById[b.bien_id]?.name,
+    locataire: (b) => { const l = contactById[b.locataire_id]; return l ? (l.societe || `${l.last_name} ${l.first_name}`) : ""; },
+    loyer: (b) => Number(b.loyer_hors_charges) + Number(b.charges),
+    debut: (b) => b.date_debut,
+    statut: (b) => b.statut,
+  }), [bienById, contactById]);
+  const { search, setSearch, sortKey, sortDir, handleSort, visible } = useSortSearch(baux, getters, "debut");
 
   async function save(fields, id) {
     const { error } = id
@@ -1332,24 +1617,30 @@ function BauxTab({ baux, biens, contacts, bienById, contactById }) {
         </p>
       )}
       {error && <div className="text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-md px-3 py-2">{error}</div>}
+      <input
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Rechercher un contrat..."
+        className="w-full px-3 py-1.5 rounded-md border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+      />
 
       <div className="bg-white rounded-lg border border-stone-200 overflow-x-auto">
-        {baux.length === 0 ? (
-          <p className="text-sm text-stone-400 py-8 text-center">Aucun contrat pour l'instant.</p>
+        {visible.length === 0 ? (
+          <p className="text-sm text-stone-400 py-8 text-center">Aucun contrat.</p>
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-stone-400 border-b border-stone-100">
-                <th className="px-4 py-2 font-medium">Bien</th>
-                <th className="px-4 py-2 font-medium">Locataire</th>
-                <th className="px-4 py-2 font-medium text-right">Loyer + charges</th>
-                <th className="px-4 py-2 font-medium">Début</th>
-                <th className="px-4 py-2 font-medium">Statut</th>
+                <SortableTh label="Bien" sortKeyName="bien" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                <SortableTh label="Locataire" sortKeyName="locataire" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                <SortableTh label="Loyer + charges" sortKeyName="loyer" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
+                <SortableTh label="Début" sortKeyName="debut" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                <SortableTh label="Statut" sortKeyName="statut" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                 <th className="px-4 py-2 font-medium w-24"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-100">
-              {baux.map((b) => {
+              {visible.map((b) => {
                 const bien = bienById[b.bien_id];
                 const loc = contactById[b.locataire_id];
                 return (
