@@ -944,7 +944,7 @@ function SuiviTab({ biens, baux, contacts, bienById }) {
                     const { bail, locataire } = bailAndLocataireFor(e);
                     const bien = bienById[e.bien_id];
                     const canDoc = bien && (e.categorie === "Loyer" || e.categorie === "Variable" || e.categorie === "Caution");
-                    const isPaid = !!(e.reference_paiement && e.date_paiement);
+                    const isPaid = !!e.reference_paiement;
                     return (
                       <tr key={e.id} className="hover:bg-stone-50">
                         <td className="px-4 py-2.5 text-stone-500 text-xs cursor-pointer" onClick={() => setEditing(e)}>{formatDateFR(e.date)}</td>
