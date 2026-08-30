@@ -607,7 +607,6 @@ function SimulationLmnpTab({ biens }) {
   const [valeurMobilier, setValeurMobilier] = useState("");
   const [dureeImmo, setDureeImmo] = useState("20");
   const [dureeMobilier, setDureeMobilier] = useState("10");
-  const [tauxTheorique, setTauxTheorique] = useState("");
 
   useEffect(() => {
     if (bien) {
@@ -630,7 +629,8 @@ function SimulationLmnpTab({ biens }) {
   const amortissementDispoAnnuel = dotationImmo + dotationMobilier;
 
   const valeurBien = n(valeurImmo) + n(valeurMobilier);
-  const loyerEstime = valeurBien * (n(tauxTheorique) / 100);
+  const tauxTheorique = bien?.taux_rendement_theorique;
+  const loyerEstime = tauxTheorique != null ? valeurBien * (Number(tauxTheorique) / 100) : null;
 
   const bienEntries = entries.filter((e) => e.bien_id === bienId);
   const years = Array.from(new Set(bienEntries.map((e) => e.date.slice(0, 4)))).sort();
@@ -684,17 +684,20 @@ function SimulationLmnpTab({ biens }) {
       </p>
 
       <div className="bg-white rounded-lg border border-stone-200 p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <SimField label="Rendement théorique saisi (%)" value={tauxTheorique} onChange={setTauxTheorique} suffix="%" />
+        <div>
+          <p className="text-xs text-stone-500 mb-1">Rendement théorique annuel (défini dans la fiche du bien)</p>
+          <p className="font-mono text-sm text-stone-700 py-1.5">{tauxTheorique != null ? `${tauxTheorique} %` : "— (à saisir dans Biens)"}</p>
+        </div>
         <div>
           <p className="text-xs text-stone-500 mb-1">Loyer estimé correspondant</p>
-          <p className="font-mono text-sm text-stone-700 py-1.5">{formatEUR(loyerEstime)} / an</p>
+          <p className="font-mono text-sm text-stone-700 py-1.5">{loyerEstime != null ? `${formatEUR(loyerEstime)} / an` : "—"}</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <SyntheseMetric
-          label="Rendement théorique (saisi)"
-          value={tauxTheorique ? `${n(tauxTheorique).toFixed(1)} % / an` : "—"}
+          label="Rendement théorique"
+          value={tauxTheorique != null ? `${Number(tauxTheorique).toFixed(1)} % / an` : "—"}
           tone="sky"
         />
         <SyntheseMetric
@@ -1044,6 +1047,7 @@ function BienModal({ bien, onCancel, onSave, onDelete }) {
   const [prixMobilier, setPrixMobilier] = useState(bien?.prix_mobilier != null ? String(bien.prix_mobilier) : "");
   const [apport, setApport] = useState(bien?.apport != null ? String(bien.apport) : "");
   const [montantPret, setMontantPret] = useState(bien?.montant_pret != null ? String(bien.montant_pret) : "");
+  const [tauxRendementTheorique, setTauxRendementTheorique] = useState(bien?.taux_rendement_theorique != null ? String(bien.taux_rendement_theorique) : "");
   const [notes, setNotes] = useState(bien?.notes || "");
   const [error, setError] = useState("");
 
@@ -1113,6 +1117,10 @@ function BienModal({ bien, onCancel, onSave, onDelete }) {
             <label className="text-xs text-stone-500 block mb-1">Montant emprunté (€)</label>
             <input type="number" min="0" value={montantPret} onChange={(e) => setMontantPret(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Rendement théorique annuel (%, pour Simulation LMNP)</label>
+            <input type="number" min="0" step="0.1" value={tauxRendementTheorique} onChange={(e) => setTauxRendementTheorique(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
           <div className="sm:col-span-2">
             <label className="text-xs text-stone-500 block mb-1">Désignation complémentaire (bâtiment, étage, équipements...)</label>
             <textarea value={complementDesignation} onChange={(e) => setComplementDesignation(e.target.value)} rows={2} placeholder="Bâtiment A, 8ème étage, cave n°59, ascenseur, chauffage collectif..." className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
@@ -1142,6 +1150,7 @@ function BienModal({ bien, onCancel, onSave, onDelete }) {
                   prix_mobilier: prixMobilier ? parseFloat(prixMobilier) : null,
                   apport: apport ? parseFloat(apport) : null,
                   montant_pret: montantPret ? parseFloat(montantPret) : null,
+                  taux_rendement_theorique: tauxRendementTheorique ? parseFloat(tauxRendementTheorique) : null,
                   notes: notes.trim() || null,
                 });
               }}
