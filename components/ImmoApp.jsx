@@ -21,6 +21,9 @@ import { supabase } from "../lib/supabaseClient";
 function formatEUR(n) {
   return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(Math.round(n || 0));
 }
+function formatEUR2(n) {
+  return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n || 0));
+}
 function formatDateFR(d) {
   if (!d) return "";
   const [y, m, day] = d.split("-");
@@ -788,12 +791,13 @@ function SuiviTab({ biens, baux, contacts, bienById }) {
   }, [fetchEntries]);
 
   async function save(fields, id) {
-    const { error } = id
-      ? await supabase.from("ecritures_locatives").update(fields).eq("id", id)
-      : await supabase.from("ecritures_locatives").insert(fields);
-    if (error) { setError("Impossible d'enregistrer cette écriture."); return false; }
+    const query = id
+      ? supabase.from("ecritures_locatives").update(fields).eq("id", id).select().single()
+      : supabase.from("ecritures_locatives").insert(fields).select().single();
+    const { data, error } = await query;
+    if (error) { setError("Impossible d'enregistrer cette écriture."); return null; }
     setError("");
-    return true;
+    return data;
   }
   async function remove(id) {
     const { error } = await supabase.from("ecritures_locatives").delete().eq("id", id);
@@ -989,7 +993,20 @@ function SuiviTab({ biens, baux, contacts, bienById }) {
           biens={biens}
           baux={baux}
           onCancel={() => setEditing(undefined)}
-          onSave={async (fields) => { const ok = await save(fields, editing?.id); if (ok) setEditing(undefined); }}
+          onSave={async (fields) => {
+            const saved = await save(fields, editing?.id);
+            if (saved) {
+              setEditing(undefined);
+              if (saved.reference_paiement) {
+                const bien = bienById[saved.bien_id];
+                if (bien) {
+                  const { bail, locataire } = bailAndLocataireFor(saved);
+                  if (saved.categorie === "Caution") generateCautionReceiptPdf(saved, bien, bail, locataire);
+                  else if (saved.categorie === "Loyer" || saved.categorie === "Variable") generateQuittancePdf(saved, bien, bail, locataire);
+                }
+              }
+            }
+          }}
           onDelete={editing ? async () => { const ok = await remove(editing.id); if (ok) setEditing(undefined); } : null}
         />
       )}
@@ -1278,10 +1295,10 @@ function generateGarageContractPdf(bail, bien, locataire) {
   w.heading("Conditions financières");
   const total = Number(bail.loyer_hors_charges) + Number(bail.charges);
   w.financeTable([
-    ["Loyer hors charges", formatEUR(bail.loyer_hors_charges)],
-    ["Provision sur charges", formatEUR(bail.charges)],
-    ["Total mensuel", formatEUR(total)],
-    ["Dépôt de garantie", formatEUR(bail.depot_garantie)],
+    ["Loyer hors charges", formatEUR2(bail.loyer_hors_charges)],
+    ["Provision sur charges", formatEUR2(bail.charges)],
+    ["Total mensuel", formatEUR2(total)],
+    ["Dépôt de garantie", formatEUR2(bail.depot_garantie)],
   ]);
   w.paragraph(`Paiement d'avance, en totalité, le ${bail.jour_paiement} de chaque mois, entre les mains du bailleur.`);
 
@@ -1306,7 +1323,7 @@ function generateGarageContractPdf(bail, bien, locataire) {
 
   w.spacer(3);
   w.heading("Dépôt de garantie");
-  w.paragraph(`Le preneur verse, à la signature du présent contrat, un dépôt de garantie de ${formatEUR(bail.depot_garantie)}, lequel ne sera pas productif d'intérêts. Ce dépôt sera remboursé à la fin de la location, après remise des équipements et déduction faite des éventuelles réparations locatives à effectuer.`);
+  w.paragraph(`Le preneur verse, à la signature du présent contrat, un dépôt de garantie de ${formatEUR2(bail.depot_garantie)}, lequel ne sera pas productif d'intérêts. Ce dépôt sera remboursé à la fin de la location, après remise des équipements et déduction faite des éventuelles réparations locatives à effectuer.`);
 
   w.spacer(3);
   w.heading("Destination des locaux");
@@ -1362,10 +1379,10 @@ function generateResidentialContractPdf(bail, bien, locataire) {
   w.heading("Conditions financières");
   const total = Number(bail.loyer_hors_charges) + Number(bail.charges);
   w.financeTable([
-    ["Loyer hors charges", formatEUR(bail.loyer_hors_charges)],
-    ["Provision sur charges", formatEUR(bail.charges)],
-    ["Total mensuel", formatEUR(total)],
-    ["Dépôt de garantie", formatEUR(bail.depot_garantie)],
+    ["Loyer hors charges", formatEUR2(bail.loyer_hors_charges)],
+    ["Provision sur charges", formatEUR2(bail.charges)],
+    ["Total mensuel", formatEUR2(total)],
+    ["Dépôt de garantie", formatEUR2(bail.depot_garantie)],
   ]);
 
   w.spacer(3);
@@ -1399,7 +1416,7 @@ function generateResidentialContractPdf(bail, bien, locataire) {
 
   w.spacer(3);
   w.heading("Dépôt de garantie");
-  w.paragraph(`Le locataire verse ce jour un dépôt de garantie de ${formatEUR(bail.depot_garantie)} (un mois de loyer hors charges). Il sera restitué sans intérêt en fin de bail, dans un délai d'1 mois si l'état des lieux de sortie est conforme, ou de 2 mois dans le cas contraire.`);
+  w.paragraph(`Le locataire verse ce jour un dépôt de garantie de ${formatEUR2(bail.depot_garantie)} (un mois de loyer hors charges). Il sera restitué sans intérêt en fin de bail, dans un délai d'1 mois si l'état des lieux de sortie est conforme, ou de 2 mois dans le cas contraire.`);
 
   w.spacer(3);
   w.heading("Résiliation du contrat");
@@ -1472,12 +1489,12 @@ function detailLoyerRows(entry, bail) {
   if (bail && (Number(bail.loyer_hors_charges) > 0 || Number(bail.charges) > 0)) {
     const total = Number(bail.loyer_hors_charges) + Number(bail.charges);
     return [
-      ["Loyer nu", formatEUR(bail.loyer_hors_charges)],
-      ["Charges / provisions de charges", formatEUR(bail.charges)],
-      ["Montant total du terme", formatEUR(total)],
+      ["Loyer nu", formatEUR2(bail.loyer_hors_charges)],
+      ["Charges / provisions de charges", formatEUR2(bail.charges)],
+      ["Montant total du terme", formatEUR2(total)],
     ];
   }
-  return [["Montant total du terme", formatEUR(entry.amount)]];
+  return [["Montant total du terme", formatEUR2(entry.amount)]];
 }
 
 function generateAvisEcheancePdf(entry, bien, bail, locataire) {
@@ -1517,8 +1534,8 @@ function generateQuittancePdf(entry, bien, bail, locataire) {
   w.spacer(4);
   w.heading("Règlement reçu");
   const paiementTxt = entry.reference_paiement
-    ? `La somme de ${formatEUR(entry.amount)} a été reçue par virement bancaire, référence ${entry.reference_paiement}${entry.date_paiement ? `, le ${formatDateFR(entry.date_paiement)}` : ""}.`
-    : `La somme de ${formatEUR(entry.amount)} a été reçue en règlement du terme ci-dessous.`;
+    ? `La somme de ${formatEUR2(entry.amount)} a été reçue par virement bancaire, référence ${entry.reference_paiement}${entry.date_paiement ? `, le ${formatDateFR(entry.date_paiement)}` : ""}.`
+    : `La somme de ${formatEUR2(entry.amount)} a été reçue en règlement du terme ci-dessous.`;
   w.paragraph(paiementTxt);
   w.paragraph(`En paiement du terme de : ${periodeLabel(entry.date)}.`);
   w.financeTable(detailLoyerRows(entry, bail));
@@ -1553,8 +1570,8 @@ function generateCautionReceiptPdf(entry, bien, bail, locataire) {
   w.spacer(4);
   w.heading("Dépôt reçu");
   const paiementTxt = entry.reference_paiement
-    ? `La somme de ${formatEUR(entry.amount)} a été reçue par virement bancaire, référence ${entry.reference_paiement}${entry.date_paiement ? `, le ${formatDateFR(entry.date_paiement)}` : ""}.`
-    : `La somme de ${formatEUR(entry.amount)} a été reçue au titre du dépôt de garantie.`;
+    ? `La somme de ${formatEUR2(entry.amount)} a été reçue par virement bancaire, référence ${entry.reference_paiement}${entry.date_paiement ? `, le ${formatDateFR(entry.date_paiement)}` : ""}.`
+    : `La somme de ${formatEUR2(entry.amount)} a été reçue au titre du dépôt de garantie.`;
   w.paragraph(paiementTxt);
   w.paragraph("Le dépôt de garantie ne produit pas d'intérêts. Il sera remboursé, lorsqu'il sera payable, minoré des éventuelles retenues prévues au contrat de bail, dans les conditions et délais fixés par la réglementation en vigueur.");
 
