@@ -86,6 +86,7 @@ export default function ImmoApp({ session }) {
   }, [fetchAll]);
 
   const bienById = useMemo(() => Object.fromEntries(biens.map((b) => [b.id, b])), [biens]);
+  const biensLocatifs = useMemo(() => biens.filter((b) => b.type !== "residence_principale"), [biens]);
   const contactById = useMemo(() => Object.fromEntries(contacts.map((c) => [c.id, c])), [contacts]);
 
   async function logout() {
@@ -153,10 +154,10 @@ export default function ImmoApp({ session }) {
         {activeTab === "biens" && <BiensTab biens={biens} baux={baux} />}
         {activeTab === "baux" && <BauxTab baux={baux} biens={biens} contacts={contacts} bienById={bienById} contactById={contactById} />}
         {activeTab === "suivi" && <SuiviTab biens={biens} baux={baux} contacts={contacts} bienById={bienById} />}
-        {activeTab === "synthese" && <SyntheseTab biens={biens} />}
-        {activeTab === "remboursements" && <RemboursementsTab />}
-        {activeTab === "simulation-vente" && <SimulationVenteTab biens={biens} />}
-        {activeTab === "simulation-lmnp" && <SimulationLmnpTab biens={biens} />}
+        {activeTab === "synthese" && <SyntheseTab biens={biensLocatifs} />}
+        {activeTab === "remboursements" && <RemboursementsTab biens={biens} bienById={bienById} />}
+        {activeTab === "simulation-vente" && <SimulationVenteTab biens={biensLocatifs} />}
+        {activeTab === "simulation-lmnp" && <SimulationLmnpTab biens={biensLocatifs} baux={baux} />}
       </main>
     </div>
   );
@@ -361,10 +362,10 @@ function CoutLigne({ label, value, bold }) {
 
 /* ---------------- REMBOURSEMENTS (prêts) ---------------- */
 
-function RemboursementsTab() {
+function RemboursementsTab({ biens, bienById }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState(null);
+  const [selectedBienId, setSelectedBienId] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -374,12 +375,16 @@ function RemboursementsTab() {
     })();
   }, []);
 
-  const labels = useMemo(() => Array.from(new Set(rows.map((r) => r.bien_label))), [rows]);
-  useEffect(() => { if (!selected && labels.length) setSelected(labels[0]); }, [labels, selected]);
+  const bienIdsWithData = useMemo(() => Array.from(new Set(rows.map((r) => r.bien_id).filter(Boolean))), [rows]);
+  useEffect(() => { if (!selectedBienId && bienIdsWithData.length) setSelectedBienId(bienIdsWithData[0]); }, [bienIdsWithData, selectedBienId]);
 
-  const filtered = rows.filter((r) => r.bien_label === selected);
-  const capitalRestant = filtered.length ? filtered[filtered.length - 1].capital_restant_du : 0;
-  const totalInterets = filtered.reduce((s, r) => s + Number(r.part_interets), 0);
+  const filtered = rows.filter((r) => r.bien_id === selectedBienId);
+  const todayStr = todayISO();
+  const currentRow = filtered.find((r) => r.date_echeance >= todayStr) || filtered[filtered.length - 1];
+  const capitalRestant = currentRow ? currentRow.capital_restant_du : 0;
+  const interetsRestants = filtered
+    .filter((r) => r.date_echeance >= todayStr)
+    .reduce((s, r) => s + Number(r.part_interets), 0);
   const dateFin = filtered.length ? filtered[filtered.length - 1].date_echeance : null;
 
   if (loading) return <div className="p-8 text-sm text-stone-400">Chargement…</div>;
@@ -391,14 +396,14 @@ function RemboursementsTab() {
         <p className="text-stone-500 text-sm mt-1">Échéanciers de prêt, restants à courir.</p>
       </div>
 
-      <div className="flex gap-2">
-        {labels.map((l) => (
+      <div className="flex gap-2 flex-wrap">
+        {bienIdsWithData.map((id) => (
           <button
-            key={l}
-            onClick={() => setSelected(l)}
-            className={`px-3 py-1.5 rounded-full text-sm border ${selected === l ? "bg-blue-900 text-white border-blue-900" : "bg-white text-stone-600 border-stone-300 hover:bg-stone-100"}`}
+            key={id}
+            onClick={() => setSelectedBienId(id)}
+            className={`px-3 py-1.5 rounded-full text-sm border ${selectedBienId === id ? "bg-blue-900 text-white border-blue-900" : "bg-white text-stone-600 border-stone-300 hover:bg-stone-100"}`}
           >
-            {l}
+            {bienById[id]?.name || "Bien"}
           </button>
         ))}
       </div>
@@ -408,8 +413,8 @@ function RemboursementsTab() {
       ) : (
         <>
           <div className="grid grid-cols-3 gap-3">
-            <SyntheseMetric label="Capital restant dû (dernière ligne connue)" value={formatEUR(capitalRestant)} tone="stone" />
-            <SyntheseMetric label="Intérêts restants (sur les lignes ci-dessous)" value={formatEUR(totalInterets)} tone="amber" />
+            <SyntheseMetric label="Capital restant dû (aujourd'hui)" value={formatEUR(capitalRestant)} tone="stone" />
+            <SyntheseMetric label="Intérêts restants à courir" value={formatEUR(interetsRestants)} tone="amber" />
             <SyntheseMetric label="Échéance finale connue" value={dateFin ? formatDateFR(dateFin) : "—"} tone="sky" small />
           </div>
           <div className="bg-white rounded-lg border border-stone-200 overflow-x-auto max-h-[500px] overflow-y-auto">
@@ -426,7 +431,7 @@ function RemboursementsTab() {
               </thead>
               <tbody className="divide-y divide-stone-100">
                 {filtered.map((r) => (
-                  <tr key={r.id}>
+                  <tr key={r.id} className={r.id === currentRow?.id ? "bg-blue-50" : ""}>
                     <td className="px-3 py-1.5 text-stone-500 text-xs">{r.rang}</td>
                     <td className="px-3 py-1.5 text-stone-600 text-xs">{formatDateFR(r.date_echeance)}</td>
                     <td className="px-3 py-1.5 text-right font-mono text-xs">{formatEUR2(r.montant)}</td>
@@ -592,9 +597,10 @@ function SimField({ label, value, onChange, type = "number", suffix }) {
 
 /* ---------------- SIMULATION LMNP ---------------- */
 
-function SimulationLmnpTab({ biens }) {
+function SimulationLmnpTab({ biens, baux }) {
   const [bienId, setBienId] = useState(biens[0]?.id || "");
   const bien = biens.find((b) => b.id === bienId);
+  const bail = baux.filter((b) => b.bien_id === bienId).sort((a, b) => (a.statut === "actif" ? -1 : 1))[0];
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -602,11 +608,14 @@ function SimulationLmnpTab({ biens }) {
   const [valeurMobilier, setValeurMobilier] = useState("");
   const [dureeImmo, setDureeImmo] = useState("20");
   const [dureeMobilier, setDureeMobilier] = useState("10");
+  const [valeurBien, setValeurBien] = useState("");
 
   useEffect(() => {
     if (bien) {
       setValeurImmo(bien.prix_achat != null ? String(bien.prix_achat) : "");
       setValeurMobilier(bien.prix_mobilier != null ? String(bien.prix_mobilier) : "");
+      const acquisitionCost = Number(bien.montant_pret || 0) + Number(bien.apport || 0);
+      setValeurBien(acquisitionCost > 0 ? String(acquisitionCost) : (bien.prix_achat != null ? String(bien.prix_achat) : ""));
     }
   }, [bienId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -623,6 +632,9 @@ function SimulationLmnpTab({ biens }) {
   const dotationMobilier = n(dureeMobilier) > 0 ? n(valeurMobilier) / n(dureeMobilier) : 0;
   const amortissementDispoAnnuel = dotationImmo + dotationMobilier;
 
+  const loyerGarantiAnnuel = bail ? Number(bail.loyer_hors_charges) * 12 : 0;
+  const rendementTheorique = n(valeurBien) > 0 ? (loyerGarantiAnnuel / n(valeurBien)) * 100 : null;
+
   const bienEntries = entries.filter((e) => e.bien_id === bienId);
   const years = Array.from(new Set(bienEntries.map((e) => e.date.slice(0, 4)))).sort();
 
@@ -636,10 +648,15 @@ function SimulationLmnpTab({ biens }) {
       const amortissementDeduit = Math.max(0, Math.min(resultatAvant, amortissementDispo));
       report = amortissementDispo - amortissementDeduit;
       const resultatNet = Math.max(0, resultatAvant - amortissementDeduit);
-      return { year: y, revenus, charges, resultatAvant, amortissementDeduit, reportCumule: report, resultatNet };
+      const rendementReel = n(valeurBien) > 0 ? (resultatAvant / n(valeurBien)) * 100 : null;
+      return { year: y, revenus, charges, resultatAvant, amortissementDeduit, reportCumule: report, resultatNet, rendementReel };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [years.join(","), amortissementDispoAnnuel]);
+  }, [years.join(","), amortissementDispoAnnuel, valeurBien]);
+
+  const rendementReelMoyen = table.length
+    ? table.reduce((s, r) => s + (r.rendementReel || 0), 0) / table.length
+    : null;
 
   if (loading) return <div className="p-8 text-sm text-stone-400">Chargement…</div>;
 
@@ -659,12 +676,26 @@ function SimulationLmnpTab({ biens }) {
       </div>
 
       <div className="bg-white rounded-lg border border-stone-200 p-4 grid grid-cols-1 sm:grid-cols-4 gap-3">
+        <SimField label="Valeur du bien pour le calcul de rentabilité (€)" value={valeurBien} onChange={setValeurBien} />
         <SimField label="Valeur immobilier amortissable (€)" value={valeurImmo} onChange={setValeurImmo} />
         <SimField label="Durée amortissement immo (ans)" value={dureeImmo} onChange={setDureeImmo} />
         <SimField label="Valeur mobilier (€)" value={valeurMobilier} onChange={setValeurMobilier} />
         <SimField label="Durée amortissement mobilier (ans)" value={dureeMobilier} onChange={setDureeMobilier} />
       </div>
       <p className="text-xs text-stone-500">Dotation annuelle disponible : {formatEUR(amortissementDispoAnnuel)} ({formatEUR(dotationImmo)} immobilier + {formatEUR(dotationMobilier)} mobilier)</p>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <SyntheseMetric
+          label={`Rendement théorique (loyer garanti${bail ? ` : ${formatEUR(loyerGarantiAnnuel)}/an` : ", aucun bail actif"})`}
+          value={rendementTheorique != null ? `${rendementTheorique.toFixed(1)} % / an` : "—"}
+          tone="sky"
+        />
+        <SyntheseMetric
+          label="Rendement réel moyen (résultat net Suivi / valeur du bien)"
+          value={rendementReelMoyen != null ? `${rendementReelMoyen.toFixed(1)} % / an` : "—"}
+          tone={rendementReelMoyen != null && rendementReelMoyen >= 0 ? "emerald" : "rose"}
+        />
+      </div>
 
       <div className="bg-white rounded-lg border border-stone-200 overflow-x-auto">
         {table.length === 0 ? (
@@ -677,6 +708,7 @@ function SimulationLmnpTab({ biens }) {
                 <th className="px-3 py-2 font-medium text-right">Revenus</th>
                 <th className="px-3 py-2 font-medium text-right">Charges</th>
                 <th className="px-3 py-2 font-medium text-right">Résultat avant amort.</th>
+                <th className="px-3 py-2 font-medium text-right">Rendement réel</th>
                 <th className="px-3 py-2 font-medium text-right">Amort. déduit</th>
                 <th className="px-3 py-2 font-medium text-right">Amort. reporté cumulé</th>
                 <th className="px-3 py-2 font-medium text-right">Résultat net imposable</th>
@@ -689,6 +721,9 @@ function SimulationLmnpTab({ biens }) {
                   <td className="px-3 py-2 text-right font-mono text-emerald-700">{formatEUR(row.revenus)}</td>
                   <td className="px-3 py-2 text-right font-mono text-rose-700">{formatEUR(row.charges)}</td>
                   <td className={`px-3 py-2 text-right font-mono ${row.resultatAvant >= 0 ? "text-stone-700" : "text-rose-700"}`}>{formatEUR(row.resultatAvant)}</td>
+                  <td className={`px-3 py-2 text-right font-mono text-xs ${row.rendementReel != null && row.rendementReel >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+                    {row.rendementReel != null ? `${row.rendementReel.toFixed(1)} %` : "—"}
+                  </td>
                   <td className="px-3 py-2 text-right font-mono text-stone-500">{formatEUR(row.amortissementDeduit)}</td>
                   <td className="px-3 py-2 text-right font-mono text-amber-700">{formatEUR(row.reportCumule)}</td>
                   <td className="px-3 py-2 text-right font-mono font-semibold text-stone-800">{formatEUR(row.resultatNet)}</td>
@@ -1024,6 +1059,7 @@ function BienModal({ bien, onCancel, onSave, onDelete }) {
               <option value="maison">Maison</option>
               <option value="garage">Garage</option>
               <option value="parking">Parking</option>
+              <option value="residence_principale">Résidence principale (non louée)</option>
               <option value="autre">Autre</option>
             </select>
           </div>
