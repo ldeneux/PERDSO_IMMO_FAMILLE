@@ -15,6 +15,9 @@ import {
   BookOpen,
   BarChart3,
   Download,
+  Landmark,
+  Calculator,
+  TrendingUp,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 
@@ -40,6 +43,9 @@ const NAV_ITEMS = [
   { key: "baux", label: "Contrats", icon: FileText },
   { key: "suivi", label: "Suivi des écritures", icon: BookOpen },
   { key: "synthese", label: "Synthèse", icon: BarChart3 },
+  { key: "remboursements", label: "Remboursements", icon: Landmark },
+  { key: "simulation-vente", label: "Simulation Vente", icon: Calculator },
+  { key: "simulation-lmnp", label: "Simulation LMNP", icon: TrendingUp },
 ];
 
 export default function ImmoApp({ session }) {
@@ -148,6 +154,9 @@ export default function ImmoApp({ session }) {
         {activeTab === "baux" && <BauxTab baux={baux} biens={biens} contacts={contacts} bienById={bienById} contactById={contactById} />}
         {activeTab === "suivi" && <SuiviTab biens={biens} baux={baux} contacts={contacts} bienById={bienById} />}
         {activeTab === "synthese" && <SyntheseTab biens={biens} />}
+        {activeTab === "remboursements" && <RemboursementsTab />}
+        {activeTab === "simulation-vente" && <SimulationVenteTab biens={biens} />}
+        {activeTab === "simulation-lmnp" && <SimulationLmnpTab biens={biens} />}
       </main>
     </div>
   );
@@ -350,7 +359,350 @@ function CoutLigne({ label, value, bold }) {
   );
 }
 
-/* ---------------- CONTACTS ---------------- */
+/* ---------------- REMBOURSEMENTS (prêts) ---------------- */
+
+function RemboursementsTab() {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("remboursements_pret").select("*").order("rang", { ascending: true });
+      setRows(data || []);
+      setLoading(false);
+    })();
+  }, []);
+
+  const labels = useMemo(() => Array.from(new Set(rows.map((r) => r.bien_label))), [rows]);
+  useEffect(() => { if (!selected && labels.length) setSelected(labels[0]); }, [labels, selected]);
+
+  const filtered = rows.filter((r) => r.bien_label === selected);
+  const capitalRestant = filtered.length ? filtered[filtered.length - 1].capital_restant_du : 0;
+  const totalInterets = filtered.reduce((s, r) => s + Number(r.part_interets), 0);
+  const dateFin = filtered.length ? filtered[filtered.length - 1].date_echeance : null;
+
+  if (loading) return <div className="p-8 text-sm text-stone-400">Chargement…</div>;
+
+  return (
+    <div className="max-w-4xl mx-auto p-5 sm:p-8 space-y-6">
+      <div>
+        <h1 className="font-serif text-2xl text-blue-900 tracking-tight">Remboursements</h1>
+        <p className="text-stone-500 text-sm mt-1">Échéanciers de prêt, restants à courir.</p>
+      </div>
+
+      <div className="flex gap-2">
+        {labels.map((l) => (
+          <button
+            key={l}
+            onClick={() => setSelected(l)}
+            className={`px-3 py-1.5 rounded-full text-sm border ${selected === l ? "bg-blue-900 text-white border-blue-900" : "bg-white text-stone-600 border-stone-300 hover:bg-stone-100"}`}
+          >
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {filtered.length === 0 ? (
+        <p className="text-sm text-stone-400">Aucune donnée.</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-3">
+            <SyntheseMetric label="Capital restant dû (dernière ligne connue)" value={formatEUR(capitalRestant)} tone="stone" />
+            <SyntheseMetric label="Intérêts restants (sur les lignes ci-dessous)" value={formatEUR(totalInterets)} tone="amber" />
+            <SyntheseMetric label="Échéance finale connue" value={dateFin ? formatDateFR(dateFin) : "—"} tone="sky" small />
+          </div>
+          <div className="bg-white rounded-lg border border-stone-200 overflow-x-auto max-h-[500px] overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-white">
+                <tr className="text-left text-xs text-stone-400 border-b border-stone-100">
+                  <th className="px-3 py-2 font-medium">Rang</th>
+                  <th className="px-3 py-2 font-medium">Échéance</th>
+                  <th className="px-3 py-2 font-medium text-right">Montant</th>
+                  <th className="px-3 py-2 font-medium text-right">Capital amorti</th>
+                  <th className="px-3 py-2 font-medium text-right">Intérêts</th>
+                  <th className="px-3 py-2 font-medium text-right">Capital restant dû</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-stone-100">
+                {filtered.map((r) => (
+                  <tr key={r.id}>
+                    <td className="px-3 py-1.5 text-stone-500 text-xs">{r.rang}</td>
+                    <td className="px-3 py-1.5 text-stone-600 text-xs">{formatDateFR(r.date_echeance)}</td>
+                    <td className="px-3 py-1.5 text-right font-mono text-xs">{formatEUR2(r.montant)}</td>
+                    <td className="px-3 py-1.5 text-right font-mono text-xs text-emerald-700">{formatEUR2(r.capital_amorti)}</td>
+                    <td className="px-3 py-1.5 text-right font-mono text-xs text-amber-700">{formatEUR2(r.part_interets)}</td>
+                    <td className="px-3 py-1.5 text-right font-mono text-xs text-stone-700">{formatEUR2(r.capital_restant_du)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- SIMULATION VENTE (plus-value immobilière) ---------------- */
+
+function abattementIR(years) {
+  if (years < 6) return 0;
+  if (years >= 22) return 1;
+  return Math.min((years - 5) * 0.06, 0.96);
+}
+function abattementPS(years) {
+  if (years < 6) return 0;
+  if (years >= 30) return 1;
+  if (years <= 21) return (years - 5) * 0.0165;
+  return 0.28 + (years - 22) * 0.09;
+}
+function yearsBetween(d1, d2) {
+  if (!d1 || !d2) return 0;
+  const a = new Date(d1), b = new Date(d2);
+  let years = b.getFullYear() - a.getFullYear();
+  const anniversaryPassed = (b.getMonth() > a.getMonth()) || (b.getMonth() === a.getMonth() && b.getDate() >= a.getDate());
+  if (!anniversaryPassed) years -= 1;
+  return Math.max(0, years);
+}
+
+function SimulationVenteTab({ biens }) {
+  const [bienId, setBienId] = useState(biens[0]?.id || "");
+  const bien = biens.find((b) => b.id === bienId);
+
+  const [prixAchat, setPrixAchat] = useState("");
+  const [fraisNotaire, setFraisNotaire] = useState("");
+  const [tauxTravaux, setTauxTravaux] = useState("15");
+  const [dateAchat, setDateAchat] = useState("");
+  const [prixVente, setPrixVente] = useState("");
+  const [tauxAgence, setTauxAgence] = useState("5");
+  const [dateVente, setDateVente] = useState(todayISO());
+  const [capitalRestantDu, setCapitalRestantDu] = useState("");
+  const [leveeHypotheque, setLeveeHypotheque] = useState("");
+  const [donationUsufruit, setDonationUsufruit] = useState("");
+  const [rachatSci, setRachatSci] = useState("");
+
+  useEffect(() => {
+    if (bien) {
+      setPrixAchat(bien.prix_achat != null ? String(bien.prix_achat) : "");
+      setFraisNotaire(bien.prix_notaire != null ? String(bien.prix_notaire) : "");
+      setDateAchat(bien.date_acquisition || "");
+      setCapitalRestantDu(bien.montant_pret != null ? String(bien.montant_pret) : "");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bienId]);
+
+  const n = (v) => parseFloat(v) || 0;
+  const travauxMontant = n(prixAchat) * (n(tauxTravaux) / 100);
+  const coutAcquisition = n(prixAchat) + n(fraisNotaire) + travauxMontant;
+  const fraisAgenceMontant = n(prixVente) * (n(tauxAgence) / 100);
+  const netVendeur = n(prixVente) - fraisAgenceMontant;
+  const plusValueBrute = netVendeur - coutAcquisition;
+  const dureeDetention = yearsBetween(dateAchat, dateVente);
+  const abIR = abattementIR(dureeDetention);
+  const abPS = abattementPS(dureeDetention);
+  const plusValueImposableIR = Math.max(0, plusValueBrute * (1 - abIR));
+  const plusValueImposablePS = Math.max(0, plusValueBrute * (1 - abPS));
+  const impotRevenu = plusValueImposableIR * 0.19;
+  const prelevementsSociaux = plusValueImposablePS * 0.172;
+  const fraisAnnexes = n(leveeHypotheque) + n(donationUsufruit) + n(rachatSci);
+  const netPercu = netVendeur - impotRevenu - prelevementsSociaux - fraisAnnexes - n(capitalRestantDu);
+
+  return (
+    <div className="max-w-4xl mx-auto p-5 sm:p-8 space-y-6">
+      <div>
+        <h1 className="font-serif text-2xl text-blue-900 tracking-tight">Simulation Vente</h1>
+        <p className="text-stone-500 text-sm mt-1">Calcul de la plus-value immobilière et du net perçu à la revente.</p>
+        <p className="text-xs text-stone-400 mt-1">
+          Basé sur le régime fiscal standard des plus-values immobilières (biens autres que résidence principale) :
+          abattement pour durée de détention, exonération totale d'impôt sur le revenu après 22 ans, de prélèvements
+          sociaux après 30 ans.
+        </p>
+      </div>
+
+      <div>
+        <label className="text-xs text-stone-500 block mb-1">Bien</label>
+        <select value={bienId} onChange={(e) => setBienId(e.target.value)} className="w-full sm:w-80 px-2.5 py-1.5 rounded-md border border-stone-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+          {biens.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="bg-white rounded-lg border border-stone-200 p-4 space-y-3">
+          <p className="text-xs font-medium text-stone-600">Achat</p>
+          <SimField label="Prix d'achat (€)" value={prixAchat} onChange={setPrixAchat} />
+          <SimField label="Frais de notaire (€)" value={fraisNotaire} onChange={setFraisNotaire} />
+          <SimField label="Forfait travaux (% du prix d'achat)" value={tauxTravaux} onChange={setTauxTravaux} suffix="%" />
+          <p className="text-xs text-stone-400">Montant travaux : {formatEUR(travauxMontant)}</p>
+          <SimField label="Date d'achat" value={dateAchat} onChange={setDateAchat} type="date" />
+          <p className="text-sm font-medium text-stone-700 pt-2 border-t border-stone-100">Coût d'acquisition total : <span className="font-mono">{formatEUR(coutAcquisition)}</span></p>
+        </div>
+        <div className="bg-white rounded-lg border border-stone-200 p-4 space-y-3">
+          <p className="text-xs font-medium text-stone-600">Vente</p>
+          <SimField label="Prix de vente (€)" value={prixVente} onChange={setPrixVente} />
+          <SimField label="Frais d'agence (%)" value={tauxAgence} onChange={setTauxAgence} suffix="%" />
+          <p className="text-xs text-stone-400">Montant agence : {formatEUR(fraisAgenceMontant)}</p>
+          <SimField label="Date de vente" value={dateVente} onChange={setDateVente} type="date" />
+          <SimField label="Capital restant dû (€)" value={capitalRestantDu} onChange={setCapitalRestantDu} />
+          <p className="text-sm font-medium text-stone-700 pt-2 border-t border-stone-100">Net vendeur : <span className="font-mono">{formatEUR(netVendeur)}</span></p>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg border border-stone-200 p-4 space-y-3">
+        <p className="text-xs font-medium text-stone-600">Frais annexes (optionnel)</p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <SimField label="Levée d'hypothèque (€)" value={leveeHypotheque} onChange={setLeveeHypotheque} />
+          <SimField label="Donation usufruit (€)" value={donationUsufruit} onChange={setDonationUsufruit} />
+          <SimField label="Rachat de parts SCI (€)" value={rachatSci} onChange={setRachatSci} />
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg border border-stone-200 p-4">
+        <p className="text-xs font-medium text-stone-600 mb-3">Plus-value et fiscalité — durée de détention : {dureeDetention} ans</p>
+        <table className="w-full text-sm">
+          <tbody className="divide-y divide-stone-100">
+            <tr><td className="py-1.5 text-stone-600">Plus-value brute</td><td className="py-1.5 text-right font-mono">{formatEUR(plusValueBrute)}</td></tr>
+            <tr><td className="py-1.5 text-stone-600">Abattement impôt sur le revenu</td><td className="py-1.5 text-right font-mono">{(abIR * 100).toFixed(1)} %</td></tr>
+            <tr><td className="py-1.5 text-stone-600">Impôt sur le revenu (19%)</td><td className="py-1.5 text-right font-mono text-rose-700">-{formatEUR(impotRevenu)}</td></tr>
+            <tr><td className="py-1.5 text-stone-600">Abattement prélèvements sociaux</td><td className="py-1.5 text-right font-mono">{(abPS * 100).toFixed(1)} %</td></tr>
+            <tr><td className="py-1.5 text-stone-600">Prélèvements sociaux (17,2%)</td><td className="py-1.5 text-right font-mono text-rose-700">-{formatEUR(prelevementsSociaux)}</td></tr>
+            <tr><td className="py-1.5 text-stone-600">Frais annexes</td><td className="py-1.5 text-right font-mono text-rose-700">-{formatEUR(fraisAnnexes)}</td></tr>
+            <tr><td className="py-1.5 text-stone-600">Capital restant dû</td><td className="py-1.5 text-right font-mono text-rose-700">-{formatEUR(n(capitalRestantDu))}</td></tr>
+            <tr className="border-t-2 border-stone-200"><td className="py-2 font-semibold text-stone-800">Net perçu</td><td className={`py-2 text-right font-mono font-semibold ${netPercu >= 0 ? "text-emerald-700" : "text-rose-700"}`}>{formatEUR(netPercu)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function SimField({ label, value, onChange, type = "number", suffix }) {
+  return (
+    <div>
+      <label className="text-xs text-stone-500 block mb-1">{label}</label>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+      />
+    </div>
+  );
+}
+
+/* ---------------- SIMULATION LMNP ---------------- */
+
+function SimulationLmnpTab({ biens }) {
+  const [bienId, setBienId] = useState(biens[0]?.id || "");
+  const bien = biens.find((b) => b.id === bienId);
+  const [entries, setEntries] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const [valeurImmo, setValeurImmo] = useState("");
+  const [valeurMobilier, setValeurMobilier] = useState("");
+  const [dureeImmo, setDureeImmo] = useState("20");
+  const [dureeMobilier, setDureeMobilier] = useState("10");
+
+  useEffect(() => {
+    if (bien) {
+      setValeurImmo(bien.prix_achat != null ? String(bien.prix_achat) : "");
+      setValeurMobilier(bien.prix_mobilier != null ? String(bien.prix_mobilier) : "");
+    }
+  }, [bienId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("ecritures_locatives").select("*").order("date", { ascending: true });
+      setEntries(data || []);
+      setLoading(false);
+    })();
+  }, []);
+
+  const n = (v) => parseFloat(v) || 0;
+  const dotationImmo = n(dureeImmo) > 0 ? n(valeurImmo) / n(dureeImmo) : 0;
+  const dotationMobilier = n(dureeMobilier) > 0 ? n(valeurMobilier) / n(dureeMobilier) : 0;
+  const amortissementDispoAnnuel = dotationImmo + dotationMobilier;
+
+  const bienEntries = entries.filter((e) => e.bien_id === bienId);
+  const years = Array.from(new Set(bienEntries.map((e) => e.date.slice(0, 4)))).sort();
+
+  const table = useMemo(() => {
+    let report = 0;
+    return years.map((y) => {
+      const revenus = bienEntries.filter((e) => e.date.slice(0, 4) === y && e.type === "credit").reduce((s, e) => s + Number(e.amount), 0);
+      const charges = bienEntries.filter((e) => e.date.slice(0, 4) === y && e.type === "debit").reduce((s, e) => s + Number(e.amount), 0);
+      const resultatAvant = revenus - charges;
+      const amortissementDispo = amortissementDispoAnnuel + report;
+      const amortissementDeduit = Math.max(0, Math.min(resultatAvant, amortissementDispo));
+      report = amortissementDispo - amortissementDeduit;
+      const resultatNet = Math.max(0, resultatAvant - amortissementDeduit);
+      return { year: y, revenus, charges, resultatAvant, amortissementDeduit, reportCumule: report, resultatNet };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [years.join(","), amortissementDispoAnnuel]);
+
+  if (loading) return <div className="p-8 text-sm text-stone-400">Chargement…</div>;
+
+  return (
+    <div className="max-w-5xl mx-auto p-5 sm:p-8 space-y-6">
+      <div>
+        <h1 className="font-serif text-2xl text-blue-900 tracking-tight">Simulation LMNP</h1>
+        <p className="text-stone-500 text-sm mt-1">Amortissement comptable (régime réel) vs revenus/charges réels du Suivi.</p>
+        <p className="text-xs text-stone-400 mt-1">L'amortissement ne peut jamais créer de déficit fiscal : l'excédent non utilisé une année est reporté indéfiniment sur les années suivantes.</p>
+      </div>
+
+      <div>
+        <label className="text-xs text-stone-500 block mb-1">Bien</label>
+        <select value={bienId} onChange={(e) => setBienId(e.target.value)} className="w-full sm:w-80 px-2.5 py-1.5 rounded-md border border-stone-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+          {biens.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+      </div>
+
+      <div className="bg-white rounded-lg border border-stone-200 p-4 grid grid-cols-1 sm:grid-cols-4 gap-3">
+        <SimField label="Valeur immobilier amortissable (€)" value={valeurImmo} onChange={setValeurImmo} />
+        <SimField label="Durée amortissement immo (ans)" value={dureeImmo} onChange={setDureeImmo} />
+        <SimField label="Valeur mobilier (€)" value={valeurMobilier} onChange={setValeurMobilier} />
+        <SimField label="Durée amortissement mobilier (ans)" value={dureeMobilier} onChange={setDureeMobilier} />
+      </div>
+      <p className="text-xs text-stone-500">Dotation annuelle disponible : {formatEUR(amortissementDispoAnnuel)} ({formatEUR(dotationImmo)} immobilier + {formatEUR(dotationMobilier)} mobilier)</p>
+
+      <div className="bg-white rounded-lg border border-stone-200 overflow-x-auto">
+        {table.length === 0 ? (
+          <p className="text-sm text-stone-400 py-8 text-center">Aucune écriture pour ce bien dans le Suivi.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-stone-400 border-b border-stone-100">
+                <th className="px-3 py-2 font-medium">Année</th>
+                <th className="px-3 py-2 font-medium text-right">Revenus</th>
+                <th className="px-3 py-2 font-medium text-right">Charges</th>
+                <th className="px-3 py-2 font-medium text-right">Résultat avant amort.</th>
+                <th className="px-3 py-2 font-medium text-right">Amort. déduit</th>
+                <th className="px-3 py-2 font-medium text-right">Amort. reporté cumulé</th>
+                <th className="px-3 py-2 font-medium text-right">Résultat net imposable</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-stone-100">
+              {table.map((row) => (
+                <tr key={row.year}>
+                  <td className="px-3 py-2 text-stone-700 font-medium">{row.year}</td>
+                  <td className="px-3 py-2 text-right font-mono text-emerald-700">{formatEUR(row.revenus)}</td>
+                  <td className="px-3 py-2 text-right font-mono text-rose-700">{formatEUR(row.charges)}</td>
+                  <td className={`px-3 py-2 text-right font-mono ${row.resultatAvant >= 0 ? "text-stone-700" : "text-rose-700"}`}>{formatEUR(row.resultatAvant)}</td>
+                  <td className="px-3 py-2 text-right font-mono text-stone-500">{formatEUR(row.amortissementDeduit)}</td>
+                  <td className="px-3 py-2 text-right font-mono text-amber-700">{formatEUR(row.reportCumule)}</td>
+                  <td className="px-3 py-2 text-right font-mono font-semibold text-stone-800">{formatEUR(row.resultatNet)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 
 function useSortSearch(list, getters, defaultKey) {
   const [search, setSearch] = useState("");
