@@ -474,6 +474,7 @@ function yearsBetween(d1, d2) {
 function SimulationVenteTab({ biens }) {
   const [bienId, setBienId] = useState(biens[0]?.id || "");
   const bien = biens.find((b) => b.id === bienId);
+  const [remboursements, setRemboursements] = useState([]);
 
   const [prixAchat, setPrixAchat] = useState("");
   const [fraisNotaire, setFraisNotaire] = useState("");
@@ -488,14 +489,25 @@ function SimulationVenteTab({ biens }) {
   const [rachatSci, setRachatSci] = useState("");
 
   useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("remboursements_pret").select("*").order("rang", { ascending: true });
+      setRemboursements(data || []);
+    })();
+  }, []);
+
+  useEffect(() => {
     if (bien) {
       setPrixAchat(bien.prix_achat != null ? String(bien.prix_achat) : "");
       setFraisNotaire(bien.prix_notaire != null ? String(bien.prix_notaire) : "");
       setDateAchat(bien.date_acquisition || "");
-      setCapitalRestantDu(bien.montant_pret != null ? String(bien.montant_pret) : "");
+      const todayStr = todayISO();
+      const schedule = remboursements.filter((r) => r.bien_id === bienId);
+      const currentRow = schedule.find((r) => r.date_echeance >= todayStr) || null;
+      // Pas de tableau d'amortissement pour ce bien -> on considère le prêt terminé (0)
+      setCapitalRestantDu(currentRow ? String(currentRow.capital_restant_du) : "0");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bienId]);
+  }, [bienId, remboursements]);
 
   const n = (v) => parseFloat(v) || 0;
   const travauxMontant = n(prixAchat) * (n(tauxTravaux) / 100);
@@ -549,6 +561,11 @@ function SimulationVenteTab({ biens }) {
           <p className="text-xs text-stone-400">Montant agence : {formatEUR(fraisAgenceMontant)}</p>
           <SimField label="Date de vente" value={dateVente} onChange={setDateVente} type="date" />
           <SimField label="Capital restant dû (€)" value={capitalRestantDu} onChange={setCapitalRestantDu} />
+          <p className="text-xs text-stone-400">
+            {remboursements.some((r) => r.bien_id === bienId)
+              ? "Valeur reprise de l'onglet Remboursements (échéance la plus proche d'aujourd'hui)."
+              : "Aucun tableau d'amortissement pour ce bien → prêt considéré comme terminé (0 €). Modifiable ci-dessus si besoin."}
+          </p>
           <p className="text-sm font-medium text-stone-700 pt-2 border-t border-stone-100">Net vendeur : <span className="font-mono">{formatEUR(netVendeur)}</span></p>
         </div>
       </div>
@@ -635,6 +652,11 @@ function SimulationLmnpTab({ biens }) {
   const bienEntries = entries.filter((e) => e.bien_id === bienId);
   const years = Array.from(new Set(bienEntries.map((e) => e.date.slice(0, 4)))).sort();
 
+  const revenusTotaux = bienEntries.filter((e) => e.type === "credit").reduce((s, e) => s + Number(e.amount), 0);
+  const chargesTotales = bienEntries.filter((e) => e.type === "debit").reduce((s, e) => s + Number(e.amount), 0);
+  const investissementInitial = Number(bien?.apport || 0) + Number(bien?.montant_pret || 0);
+  const prixRevientNet = investissementInitial - (revenusTotaux - chargesTotales);
+
   const table = useMemo(() => {
     let report = 0;
     return years.map((y) => {
@@ -665,11 +687,18 @@ function SimulationLmnpTab({ biens }) {
         <p className="text-xs text-stone-400 mt-1">L'amortissement ne peut jamais créer de déficit fiscal : l'excédent non utilisé une année est reporté indéfiniment sur les années suivantes.</p>
       </div>
 
-      <div>
-        <label className="text-xs text-stone-500 block mb-1">Bien</label>
-        <select value={bienId} onChange={(e) => setBienId(e.target.value)} className="w-full sm:w-80 px-2.5 py-1.5 rounded-md border border-stone-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-          {biens.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-        </select>
+      <div className="flex flex-wrap items-end gap-4">
+        <div>
+          <label className="text-xs text-stone-500 block mb-1">Bien</label>
+          <select value={bienId} onChange={(e) => setBienId(e.target.value)} className="w-full sm:w-80 px-2.5 py-1.5 rounded-md border border-stone-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+            {biens.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </div>
+        <div className="bg-white rounded-lg border border-stone-200 px-3 py-2">
+          <p className="text-[11px] text-stone-400">Prix de revient net actuel</p>
+          <p className={`font-mono text-sm ${prixRevientNet <= 0 ? "text-emerald-700" : "text-stone-800"}`}>{formatEUR(prixRevientNet)}</p>
+          <p className="text-[10px] text-stone-400">Apport + Emprunt − (revenus réels − charges réelles) depuis le Suivi</p>
+        </div>
       </div>
 
       <div className="bg-white rounded-lg border border-stone-200 p-4 grid grid-cols-1 sm:grid-cols-4 gap-3">
