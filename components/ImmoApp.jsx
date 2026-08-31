@@ -614,6 +614,14 @@ function SimField({ label, value, onChange, type = "number", suffix }) {
 
 /* ---------------- SIMULATION LMNP ---------------- */
 
+function categoryBreakdown(bienEntries, year, type) {
+  const totals = {};
+  bienEntries
+    .filter((e) => e.date.slice(0, 4) === year && e.type === type)
+    .forEach((e) => { totals[e.categorie] = (totals[e.categorie] || 0) + Number(e.amount); });
+  return Object.entries(totals).sort((a, b) => b[1] - a[1]);
+}
+
 function SimulationLmnpTab({ biens }) {
   const [bienId, setBienId] = useState(biens[0]?.id || "");
   const bien = biens.find((b) => b.id === bienId);
@@ -624,6 +632,7 @@ function SimulationLmnpTab({ biens }) {
   const [valeurMobilier, setValeurMobilier] = useState("");
   const [dureeImmo, setDureeImmo] = useState("20");
   const [dureeMobilier, setDureeMobilier] = useState("10");
+  const [expanded, setExpanded] = useState(null);
 
   useEffect(() => {
     if (bien) {
@@ -754,20 +763,57 @@ function SimulationLmnpTab({ biens }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-100">
-              {table.map((row) => (
-                <tr key={row.year}>
-                  <td className="px-3 py-2 text-stone-700 font-medium">{row.year}</td>
-                  <td className="px-3 py-2 text-right font-mono text-emerald-700">{formatEUR(row.revenus)}</td>
-                  <td className="px-3 py-2 text-right font-mono text-rose-700">{formatEUR(row.charges)}</td>
-                  <td className={`px-3 py-2 text-right font-mono ${row.resultatAvant >= 0 ? "text-stone-700" : "text-rose-700"}`}>{formatEUR(row.resultatAvant)}</td>
-                  <td className={`px-3 py-2 text-right font-mono text-xs ${row.rendementReel != null && row.rendementReel >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
-                    {row.rendementReel != null ? `${row.rendementReel.toFixed(1)} %` : "—"}
-                  </td>
-                  <td className="px-3 py-2 text-right font-mono text-stone-500">{formatEUR(row.amortissementDeduit)}</td>
-                  <td className="px-3 py-2 text-right font-mono text-amber-700">{formatEUR(row.reportCumule)}</td>
-                  <td className="px-3 py-2 text-right font-mono font-semibold text-stone-800">{formatEUR(row.resultatNet)}</td>
-                </tr>
-              ))}
+              {table.map((row) => {
+                const isExpanded = expanded && expanded.year === row.year;
+                const detailRows = isExpanded ? categoryBreakdown(bienEntries, row.year, expanded.type) : [];
+                return (
+                  <React.Fragment key={row.year}>
+                    <tr>
+                      <td className="px-3 py-2 text-stone-700 font-medium">{row.year}</td>
+                      <td
+                        onClick={() => setExpanded(isExpanded && expanded.type === "credit" ? null : { year: row.year, type: "credit" })}
+                        className="px-3 py-2 text-right font-mono text-emerald-700 cursor-pointer hover:underline"
+                      >
+                        {formatEUR(row.revenus)}
+                      </td>
+                      <td
+                        onClick={() => setExpanded(isExpanded && expanded.type === "debit" ? null : { year: row.year, type: "debit" })}
+                        className="px-3 py-2 text-right font-mono text-rose-700 cursor-pointer hover:underline"
+                      >
+                        {formatEUR(row.charges)}
+                      </td>
+                      <td className={`px-3 py-2 text-right font-mono ${row.resultatAvant >= 0 ? "text-stone-700" : "text-rose-700"}`}>{formatEUR(row.resultatAvant)}</td>
+                      <td className={`px-3 py-2 text-right font-mono text-xs ${row.rendementReel != null && row.rendementReel >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+                        {row.rendementReel != null ? `${row.rendementReel.toFixed(1)} %` : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-stone-500">{formatEUR(row.amortissementDeduit)}</td>
+                      <td className="px-3 py-2 text-right font-mono text-amber-700">{formatEUR(row.reportCumule)}</td>
+                      <td className="px-3 py-2 text-right font-mono font-semibold text-stone-800">{formatEUR(row.resultatNet)}</td>
+                    </tr>
+                    {isExpanded && (
+                      <tr className="bg-stone-50">
+                        <td colSpan={8} className="px-3 py-3">
+                          <p className="text-[11px] text-stone-500 mb-1.5">
+                            Détail {expanded.type === "credit" ? "des revenus" : "des charges"} — {row.year}
+                          </p>
+                          {detailRows.length === 0 ? (
+                            <p className="text-xs text-stone-400">Aucune écriture.</p>
+                          ) : (
+                            <ul className="flex flex-wrap gap-2">
+                              {detailRows.map(([cat, amount]) => (
+                                <li key={cat} className="text-xs bg-white border border-stone-200 rounded-md px-2.5 py-1 flex items-center gap-1.5">
+                                  <span className="text-stone-500">{cat}</span>
+                                  <span className={`font-mono ${expanded.type === "credit" ? "text-emerald-700" : "text-rose-700"}`}>{formatEUR(amount)}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
             </tbody>
           </table>
         )}
