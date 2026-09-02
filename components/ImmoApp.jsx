@@ -475,6 +475,8 @@ function SimulationVenteTab({ biens }) {
   const [bienId, setBienId] = useState(biens[0]?.id || "");
   const bien = biens.find((b) => b.id === bienId);
   const [remboursements, setRemboursements] = useState([]);
+  const [entries, setEntries] = useState([]);
+  const [showGainDetail, setShowGainDetail] = useState(false);
 
   const [prixAchat, setPrixAchat] = useState("");
   const [fraisNotaire, setFraisNotaire] = useState("");
@@ -496,18 +498,30 @@ function SimulationVenteTab({ biens }) {
   }, []);
 
   useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("ecritures_locatives").select("*");
+      setEntries(data || []);
+    })();
+  }, []);
+
+  useEffect(() => {
     if (bien) {
       setPrixAchat(bien.prix_achat != null ? String(bien.prix_achat) : "");
       setFraisNotaire(bien.prix_notaire != null ? String(bien.prix_notaire) : "");
       setDateAchat(bien.date_acquisition || "");
-      const todayStr = todayISO();
-      const schedule = remboursements.filter((r) => r.bien_id === bienId);
-      const currentRow = schedule.find((r) => r.date_echeance >= todayStr) || null;
-      // Pas de tableau d'amortissement pour ce bien -> on considère le prêt terminé (0)
-      setCapitalRestantDu(currentRow ? String(currentRow.capital_restant_du) : "0");
+      setPrixVente(bien.prix_vente != null ? String(bien.prix_vente) : "");
+      setTauxAgence(bien.frais_agence_pourcentage != null ? String(bien.frais_agence_pourcentage) : "5");
+      setDateVente(bien.date_vente || todayISO());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bienId, remboursements]);
+  }, [bienId]);
+
+  useEffect(() => {
+    const schedule = remboursements.filter((r) => r.bien_id === bienId);
+    const currentRow = schedule.find((r) => r.date_echeance >= dateVente) || null;
+    // Pas de tableau d'amortissement pour ce bien -> on considère le prêt terminé (0)
+    setCapitalRestantDu(currentRow ? String(currentRow.capital_restant_du) : "0");
+  }, [bienId, dateVente, remboursements]);
 
   const n = (v) => parseFloat(v) || 0;
   const travauxMontant = n(prixAchat) * (n(tauxTravaux) / 100);
@@ -525,23 +539,68 @@ function SimulationVenteTab({ biens }) {
   const fraisAnnexes = n(leveeHypotheque) + n(donationUsufruit) + n(rachatSci);
   const netPercu = netVendeur - impotRevenu - prelevementsSociaux - fraisAnnexes - n(capitalRestantDu);
 
+  const bienEntries = entries.filter((e) => e.bien_id === bienId);
+  const revenusTotaux = bienEntries.filter((e) => e.type === "credit").reduce((s, e) => s + Number(e.amount), 0);
+  const chargesTotales = bienEntries.filter((e) => e.type === "debit").reduce((s, e) => s + Number(e.amount), 0);
+  const fraisFiscauxTotal = impotRevenu + prelevementsSociaux + fraisAnnexes;
+  const montantPretInitial = Number(bien?.montant_pret || 0);
+  const apportInitial = Number(bien?.apport || 0);
+  const gainNet = n(prixVente) - fraisAgenceMontant + revenusTotaux - chargesTotales - fraisFiscauxTotal - montantPretInitial - apportInitial;
+
+  const simData = {
+    bien, prixAchat: n(prixAchat), fraisNotaire: n(fraisNotaire), tauxTravaux: n(tauxTravaux), travauxMontant,
+    dateAchat, coutAcquisition, prixVente: n(prixVente), tauxAgence: n(tauxAgence), fraisAgenceMontant,
+    dateVente, capitalRestantDu: n(capitalRestantDu), netVendeur, plusValueBrute, dureeDetention, abIR, abPS,
+    impotRevenu, prelevementsSociaux, leveeHypotheque: n(leveeHypotheque), donationUsufruit: n(donationUsufruit),
+    rachatSci: n(rachatSci), fraisAnnexes, netPercu, revenusTotaux, chargesTotales, fraisFiscauxTotal,
+    montantPretInitial, apportInitial, gainNet,
+  };
+
   return (
     <div className="max-w-4xl mx-auto p-5 sm:p-8 space-y-6">
-      <div>
-        <h1 className="font-serif text-2xl text-blue-900 tracking-tight">Simulation Vente</h1>
-        <p className="text-stone-500 text-sm mt-1">Calcul de la plus-value immobilière et du net perçu à la revente.</p>
-        <p className="text-xs text-stone-400 mt-1">
-          Basé sur le régime fiscal standard des plus-values immobilières (biens autres que résidence principale) :
-          abattement pour durée de détention, exonération totale d'impôt sur le revenu après 22 ans, de prélèvements
-          sociaux après 30 ans.
-        </p>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="font-serif text-2xl text-blue-900 tracking-tight">Simulation Vente</h1>
+          <p className="text-stone-500 text-sm mt-1">Calcul de la plus-value immobilière et du net perçu à la revente.</p>
+          <p className="text-xs text-stone-400 mt-1">
+            Basé sur le régime fiscal standard des plus-values immobilières (biens autres que résidence principale) :
+            abattement pour durée de détention, exonération totale d'impôt sur le revenu après 22 ans, de prélèvements
+            sociaux après 30 ans.
+          </p>
+        </div>
+        <button
+          onClick={() => generateSimulationVentePdf(simData)}
+          className="flex items-center gap-1 text-xs font-medium bg-blue-900 text-white px-3 py-1.5 rounded-md hover:bg-blue-950 shrink-0"
+        >
+          <Download size={14} /> Export PDF
+        </button>
       </div>
 
-      <div>
-        <label className="text-xs text-stone-500 block mb-1">Bien</label>
-        <select value={bienId} onChange={(e) => setBienId(e.target.value)} className="w-full sm:w-80 px-2.5 py-1.5 rounded-md border border-stone-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-          {biens.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-        </select>
+      <div className="flex flex-wrap items-start gap-4">
+        <div>
+          <label className="text-xs text-stone-500 block mb-1">Bien</label>
+          <select value={bienId} onChange={(e) => setBienId(e.target.value)} className="w-full sm:w-80 px-2.5 py-1.5 rounded-md border border-stone-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+            {biens.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </div>
+        <div className="bg-white rounded-lg border border-stone-200 px-3 py-2">
+          <button onClick={() => setShowGainDetail((v) => !v)} className="text-left">
+            <p className="text-[11px] text-stone-400">Gain net global (clique pour le détail)</p>
+            <p className={`font-mono text-sm ${gainNet >= 0 ? "text-emerald-700" : "text-rose-700"}`}>{formatEUR(gainNet)}</p>
+          </button>
+          {showGainDetail && (
+            <ul className="mt-2 space-y-0.5 text-xs border-t border-stone-100 pt-2">
+              <li className="flex justify-between gap-4"><span className="text-stone-500">Prix de vente</span><span className="font-mono">+{formatEUR(n(prixVente))}</span></li>
+              <li className="flex justify-between gap-4"><span className="text-stone-500">Frais d'agence</span><span className="font-mono text-rose-700">-{formatEUR(fraisAgenceMontant)}</span></li>
+              <li className="flex justify-between gap-4"><span className="text-stone-500">Revenus cumulés (Suivi)</span><span className="font-mono text-emerald-700">+{formatEUR(revenusTotaux)}</span></li>
+              <li className="flex justify-between gap-4"><span className="text-stone-500">Charges cumulées (Suivi)</span><span className="font-mono text-rose-700">-{formatEUR(chargesTotales)}</span></li>
+              <li className="flex justify-between gap-4"><span className="text-stone-500">Impôt + prélèv. sociaux + frais annexes</span><span className="font-mono text-rose-700">-{formatEUR(fraisFiscauxTotal)}</span></li>
+              <li className="flex justify-between gap-4"><span className="text-stone-500">Montant emprunté initial</span><span className="font-mono text-rose-700">-{formatEUR(montantPretInitial)}</span></li>
+              <li className="flex justify-between gap-4"><span className="text-stone-500">Apport</span><span className="font-mono text-rose-700">-{formatEUR(apportInitial)}</span></li>
+              <li className="flex justify-between gap-4 pt-1 border-t border-stone-100 font-semibold"><span>Gain net</span><span className={`font-mono ${gainNet >= 0 ? "text-emerald-700" : "text-rose-700"}`}>{formatEUR(gainNet)}</span></li>
+            </ul>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -563,7 +622,7 @@ function SimulationVenteTab({ biens }) {
           <SimField label="Capital restant dû (€)" value={capitalRestantDu} onChange={setCapitalRestantDu} />
           <p className="text-xs text-stone-400">
             {remboursements.some((r) => r.bien_id === bienId)
-              ? "Valeur reprise de l'onglet Remboursements (échéance la plus proche d'aujourd'hui)."
+              ? "Valeur reprise de l'onglet Remboursements (échéance la plus proche de la date de vente)."
               : "Aucun tableau d'amortissement pour ce bien → prêt considéré comme terminé (0 €). Modifiable ci-dessus si besoin."}
           </p>
           <p className="text-sm font-medium text-stone-700 pt-2 border-t border-stone-100">Net vendeur : <span className="font-mono">{formatEUR(netVendeur)}</span></p>
@@ -610,6 +669,64 @@ function SimField({ label, value, onChange, type = "number", suffix }) {
       />
     </div>
   );
+}
+
+function generateSimulationVentePdf(d) {
+  const doc = pdfDoc();
+  const startY = addLetterhead(doc, "Simulation Vente", d.bien?.name || "");
+  const w = makeSectionWriter(doc, startY);
+
+  w.heading("Achat");
+  w.field("Prix d'achat", formatEUR2(d.prixAchat));
+  w.field("Frais de notaire", formatEUR2(d.fraisNotaire));
+  w.field("Forfait travaux", `${d.tauxTravaux} % soit ${formatEUR2(d.travauxMontant)}`);
+  w.field("Date d'achat", d.dateAchat ? formatDateFR(d.dateAchat) : "—");
+  w.field("Coût d'acquisition total", formatEUR2(d.coutAcquisition));
+
+  w.spacer(3);
+  w.heading("Vente");
+  w.field("Prix de vente", formatEUR2(d.prixVente));
+  w.field("Frais d'agence", `${d.tauxAgence} % soit ${formatEUR2(d.fraisAgenceMontant)}`);
+  w.field("Date de vente", d.dateVente ? formatDateFR(d.dateVente) : "—");
+  w.field("Capital restant dû", formatEUR2(d.capitalRestantDu));
+  w.field("Net vendeur", formatEUR2(d.netVendeur));
+
+  if (d.leveeHypotheque || d.donationUsufruit || d.rachatSci) {
+    w.spacer(3);
+    w.heading("Frais annexes");
+    if (d.leveeHypotheque) w.field("Levée d'hypothèque", formatEUR2(d.leveeHypotheque));
+    if (d.donationUsufruit) w.field("Donation usufruit", formatEUR2(d.donationUsufruit));
+    if (d.rachatSci) w.field("Rachat de parts SCI", formatEUR2(d.rachatSci));
+  }
+
+  w.spacer(4);
+  w.heading(`Plus-value et fiscalité — durée de détention : ${d.dureeDetention} ans`);
+  w.financeTable([
+    ["Plus-value brute", formatEUR2(d.plusValueBrute)],
+    [`Abattement impôt sur le revenu (${(d.abIR * 100).toFixed(1)}%)`, ""],
+    ["Impôt sur le revenu (19%)", `-${formatEUR2(d.impotRevenu)}`],
+    [`Abattement prélèvements sociaux (${(d.abPS * 100).toFixed(1)}%)`, ""],
+    ["Prélèvements sociaux (17,2%)", `-${formatEUR2(d.prelevementsSociaux)}`],
+    ["Frais annexes", `-${formatEUR2(d.fraisAnnexes)}`],
+    ["Capital restant dû", `-${formatEUR2(d.capitalRestantDu)}`],
+    ["Net perçu", formatEUR2(d.netPercu)],
+  ]);
+
+  w.spacer(4);
+  w.heading("Gain net global (depuis l'acquisition)");
+  w.financeTable([
+    ["Prix de vente", formatEUR2(d.prixVente)],
+    ["Frais d'agence", `-${formatEUR2(d.fraisAgenceMontant)}`],
+    ["Revenus cumulés (Suivi)", `+${formatEUR2(d.revenusTotaux)}`],
+    ["Charges cumulées (Suivi)", `-${formatEUR2(d.chargesTotales)}`],
+    ["Impôt + prélèv. sociaux + frais annexes", `-${formatEUR2(d.fraisFiscauxTotal)}`],
+    ["Montant emprunté initial", `-${formatEUR2(d.montantPretInitial)}`],
+    ["Apport", `-${formatEUR2(d.apportInitial)}`],
+    ["Gain net", formatEUR2(d.gainNet)],
+  ]);
+
+  addPageNumbers(doc);
+  doc.save(`simulation-vente-${(d.bien?.name || "bien").replace(/[^a-z0-9]/gi, "_")}.pdf`);
 }
 
 /* ---------------- SIMULATION LMNP ---------------- */
@@ -1123,6 +1240,9 @@ function BienModal({ bien, onCancel, onSave, onDelete }) {
   const [apport, setApport] = useState(bien?.apport != null ? String(bien.apport) : "");
   const [montantPret, setMontantPret] = useState(bien?.montant_pret != null ? String(bien.montant_pret) : "");
   const [tauxRendementTheorique, setTauxRendementTheorique] = useState(bien?.taux_rendement_theorique != null ? String(bien.taux_rendement_theorique) : "");
+  const [dateVente, setDateVente] = useState(bien?.date_vente || "");
+  const [prixVente, setPrixVente] = useState(bien?.prix_vente != null ? String(bien.prix_vente) : "");
+  const [fraisAgencePourcentage, setFraisAgencePourcentage] = useState(bien?.frais_agence_pourcentage != null ? String(bien.frais_agence_pourcentage) : "");
   const [notes, setNotes] = useState(bien?.notes || "");
   const [error, setError] = useState("");
 
@@ -1196,6 +1316,21 @@ function BienModal({ bien, onCancel, onSave, onDelete }) {
             <label className="text-xs text-stone-500 block mb-1">Rendement théorique annuel (%, pour Simulation LMNP)</label>
             <input type="number" min="0" step="0.1" value={tauxRendementTheorique} onChange={(e) => setTauxRendementTheorique(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
+          <div className="sm:col-span-2 pt-2 border-t border-stone-100">
+            <p className="text-xs font-medium text-stone-600 mb-2">Vente (si statut "Vendu")</p>
+          </div>
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Date de vente</label>
+            <input type="date" value={dateVente} onChange={(e) => setDateVente(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Prix de vente (€)</label>
+            <input type="number" min="0" value={prixVente} onChange={(e) => setPrixVente(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Frais d'agence (%)</label>
+            <input type="number" min="0" step="0.1" value={fraisAgencePourcentage} onChange={(e) => setFraisAgencePourcentage(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
           <div className="sm:col-span-2">
             <label className="text-xs text-stone-500 block mb-1">Désignation complémentaire (bâtiment, étage, équipements...)</label>
             <textarea value={complementDesignation} onChange={(e) => setComplementDesignation(e.target.value)} rows={2} placeholder="Bâtiment A, 8ème étage, cave n°59, ascenseur, chauffage collectif..." className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
@@ -1226,6 +1361,9 @@ function BienModal({ bien, onCancel, onSave, onDelete }) {
                   apport: apport ? parseFloat(apport) : null,
                   montant_pret: montantPret ? parseFloat(montantPret) : null,
                   taux_rendement_theorique: tauxRendementTheorique ? parseFloat(tauxRendementTheorique) : null,
+                  date_vente: dateVente || null,
+                  prix_vente: prixVente ? parseFloat(prixVente) : null,
+                  frais_agence_pourcentage: fraisAgencePourcentage ? parseFloat(fraisAgencePourcentage) : null,
                   notes: notes.trim() || null,
                 });
               }}
