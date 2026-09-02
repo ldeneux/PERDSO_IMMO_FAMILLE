@@ -22,10 +22,10 @@ import {
 import { supabase } from "../lib/supabaseClient";
 
 function formatEUR(n) {
-  return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(Math.round(n || 0));
+  return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(Math.round(n || 0)).replace(/[\u00A0\u202F]/g, " ");
 }
 function formatEUR2(n) {
-  return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n || 0));
+  return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n || 0)).replace(/[\u00A0\u202F]/g, " ");
 }
 function formatDateFR(d) {
   if (!d) return "";
@@ -683,7 +683,7 @@ function generateSimulationVentePdf(d) {
   w.field("Date d'achat", d.dateAchat ? formatDateFR(d.dateAchat) : "—");
   w.field("Coût d'acquisition total", formatEUR2(d.coutAcquisition));
 
-  w.spacer(3);
+  w.spacer(1.5);
   w.heading("Vente");
   w.field("Prix de vente", formatEUR2(d.prixVente));
   w.field("Frais d'agence", `${d.tauxAgence} % soit ${formatEUR2(d.fraisAgenceMontant)}`);
@@ -699,7 +699,7 @@ function generateSimulationVentePdf(d) {
     if (d.rachatSci) w.field("Rachat de parts SCI", formatEUR2(d.rachatSci));
   }
 
-  w.spacer(4);
+  w.spacer(2);
   w.heading(`Plus-value et fiscalité — durée de détention : ${d.dureeDetention} ans`);
   w.financeTable([
     ["Plus-value brute", formatEUR2(d.plusValueBrute)],
@@ -712,7 +712,7 @@ function generateSimulationVentePdf(d) {
     ["Net perçu", formatEUR2(d.netPercu)],
   ]);
 
-  w.spacer(4);
+  w.spacer(2);
   w.heading("Gain net global (depuis l'acquisition)");
   w.financeTable([
     ["Prix de vente", formatEUR2(d.prixVente)],
@@ -1779,43 +1779,43 @@ function makeSectionWriter(doc, startY) {
   function heading(text) {
     ensureSpace(2);
     doc.setFillColor(...NAVY_LIGHT);
-    doc.rect(marginX, y - 4.5, maxWidth, 7, "F");
+    doc.rect(marginX, y - 3.8, maxWidth, 6, "F");
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
+    doc.setFontSize(9.5);
     doc.setTextColor(...NAVY);
     doc.text(text.toUpperCase(), marginX + 2, y);
     doc.setTextColor(0, 0, 0);
-    y += 8;
+    y += 6.5;
   }
   function field(label, value) {
     ensureSpace();
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(9.5);
+    doc.setFontSize(9);
     doc.text(`${label} :`, marginX, y);
     doc.setFont("helvetica", "normal");
     const split = doc.splitTextToSize(String(value ?? ""), maxWidth - labelColWidth);
     doc.text(split, marginX + labelColWidth, y);
-    y += 5 * split.length;
+    y += 4.3 * split.length;
   }
   function paragraph(text) {
     ensureSpace();
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(9.5);
+    doc.setFontSize(9);
     const split = doc.splitTextToSize(text, maxWidth);
     split.forEach((line) => {
       ensureSpace();
       doc.text(line, marginX, y);
-      y += 5;
+      y += 4.3;
     });
   }
   function bullet(text) {
     ensureSpace();
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(9.5);
+    doc.setFontSize(9);
     const split = doc.splitTextToSize(text, maxWidth - 5);
     doc.text("•", marginX, y);
     doc.text(split, marginX + 4, y);
-    y += 5 * split.length;
+    y += 4.3 * split.length;
   }
   function financeTable(rows) {
     ensureSpace(rows.length + 2);
@@ -1824,7 +1824,7 @@ function makeSectionWriter(doc, startY) {
       margin: { left: marginX, right: 18 },
       tableWidth: maxWidth,
       theme: "grid",
-      styles: { font: "helvetica", fontSize: 9.5, cellPadding: 2.2 },
+      styles: { font: "helvetica", fontSize: 9, cellPadding: 1.5 },
       headStyles: { fillColor: NAVY, textColor: 255 },
       columnStyles: { 0: { cellWidth: 110 }, 1: { cellWidth: 64, halign: "right" } },
       head: [["Montant des paiements", ""]],
