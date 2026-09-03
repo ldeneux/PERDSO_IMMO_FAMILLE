@@ -18,6 +18,8 @@ import {
   Landmark,
   Calculator,
   TrendingUp,
+  FolderOpen,
+  Upload,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 
@@ -41,6 +43,7 @@ const NAV_ITEMS = [
   { key: "contacts", label: "Contacts", icon: Users },
   { key: "biens", label: "Biens", icon: Home },
   { key: "baux", label: "Contrats", icon: FileText },
+  { key: "documents", label: "Documents", icon: FolderOpen },
   { key: "suivi", label: "Suivi des écritures", icon: BookOpen },
   { key: "synthese", label: "Synthèse", icon: BarChart3 },
   { key: "remboursements", label: "Remboursements", icon: Landmark },
@@ -153,6 +156,7 @@ export default function ImmoApp({ session }) {
         {activeTab === "contacts" && <ContactsTab contacts={contacts} baux={baux} />}
         {activeTab === "biens" && <BiensTab biens={biens} baux={baux} />}
         {activeTab === "baux" && <BauxTab baux={baux} biens={biens} contacts={contacts} bienById={bienById} contactById={contactById} />}
+        {activeTab === "documents" && <DocumentsTab biens={biens} bienById={bienById} />}
         {activeTab === "suivi" && <SuiviTab biens={biens} baux={baux} contacts={contacts} bienById={bienById} />}
         {activeTab === "synthese" && <SyntheseTab biens={biensLocatifs} />}
         {activeTab === "remboursements" && <RemboursementsTab biens={biens} bienById={bienById} />}
@@ -2201,6 +2205,179 @@ function generateCautionReceiptPdf(entry, bien, bail, locataire) {
   doc.save(`recu-caution-${bien.name.replace(/[^a-z0-9]/gi, "_")}-${entry.date}.pdf`);
 }
 
+
+/* ---------------- DOCUMENTS (par bien) ---------------- */
+
+function DocumentsTab({ biens, bienById }) {
+  const [docs, setDocs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
+
+  const [uBienId, setUBienId] = useState(biens[0]?.id || "");
+  const [uType, setUType] = useState("");
+  const [uLabel, setULabel] = useState("");
+  const [uDate, setUDate] = useState("");
+  const [uFile, setUFile] = useState(null);
+
+  const fetchDocs = useCallback(async () => {
+    const { data, error } = await supabase.from("bien_documents").select("*").order("document_date", { ascending: false });
+    if (!error) setDocs(data || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchDocs();
+    const channel = supabase
+      .channel("bien-documents-changes")
+      .on("postgres_changes", { event: "*", schema: "public", table: "bien_documents" }, fetchDocs)
+      .subscribe();
+    return () => supabase.removeChannel(channel);
+  }, [fetchDocs]);
+
+  const existingTypes = useMemo(() => Array.from(new Set(docs.map((d) => d.type))).sort(), [docs]);
+
+  const getters = useMemo(() => ({
+    date: (d) => d.document_date || "",
+    label: (d) => d.label,
+    type: (d) => d.type,
+    bien: (d) => bienById[d.bien_id]?.name || "",
+  }), [bienById]);
+  const { search, setSearch, sortKey, sortDir, handleSort, visible } = useSortSearch(docs, getters, "date");
+
+  async function handleUpload() {
+    if (!uBienId) { setError("Choisis un bien."); return; }
+    if (!uType.trim()) { setError("Indique un type de document."); return; }
+    if (!uLabel.trim()) { setError("Donne un libellé au document."); return; }
+    if (!uFile) { setError("Choisis un fichier PDF."); return; }
+    setUploading(true);
+    setError("");
+    const path = `bien-docs/${uBienId}/${Date.now()}-${uFile.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+    const { error: uploadError } = await supabase.storage.from("documents").upload(path, uFile);
+    if (uploadError) { setError("Échec de l'envoi du fichier."); setUploading(false); return; }
+    const { error: insertError } = await supabase.from("bien_documents").insert({
+      bien_id: uBienId, type: uType.trim(), label: uLabel.trim(), document_date: uDate || null, storage_path: path,
+    });
+    setUploading(false);
+    if (insertError) { setError("Fichier envoyé mais impossible d'enregistrer la fiche."); return; }
+    setUType(""); setULabel(""); setUDate(""); setUFile(null);
+    fetchDocs();
+  }
+
+  async function handleDownload(doc) {
+    const { data, error } = await supabase.storage.from("documents").createSignedUrl(doc.storage_path, 60);
+    if (error || !data?.signedUrl) { setError("Impossible de générer le lien de téléchargement."); return; }
+    window.open(data.signedUrl, "_blank");
+  }
+
+  async function handleDelete(doc) {
+    await supabase.storage.from("documents").remove([doc.storage_path]);
+    await supabase.from("bien_documents").delete().eq("id", doc.id);
+    fetchDocs();
+  }
+
+  if (loading) return <div className="p-8 text-sm text-stone-400">Chargement…</div>;
+
+  return (
+    <div className="max-w-5xl mx-auto p-5 sm:p-8 space-y-6">
+      <div>
+        <h1 className="font-serif text-2xl text-blue-900 tracking-tight">Documents</h1>
+        <p className="text-stone-500 text-sm mt-1">Actes de vente, certificats de possession, prêts... classés par bien.</p>
+      </div>
+      {error && <div className="text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-md px-3 py-2">{error}</div>}
+
+      <div className="bg-white rounded-lg border border-stone-200 p-4 space-y-3">
+        <p className="text-xs font-medium text-stone-600">Ajouter un document</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Bien</label>
+            <select value={uBienId} onChange={(e) => setUBienId(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+              {biens.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Type de document</label>
+            <input
+              value={uType}
+              onChange={(e) => setUType(e.target.value)}
+              placeholder="Acte de vente, certificat de possession, prêt..."
+              list="document-types"
+              className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <datalist id="document-types">
+              {existingTypes.map((t) => <option key={t} value={t} />)}
+            </datalist>
+          </div>
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Libellé</label>
+            <input value={uLabel} onChange={(e) => setULabel(e.target.value)} placeholder="Acte notarié Garage N°12" className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div>
+            <label className="text-xs text-stone-500 block mb-1">Date (optionnel)</label>
+            <input type="date" value={uDate} onChange={(e) => setUDate(e.target.value)} className="w-full px-2.5 py-1.5 rounded-md border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="text-xs text-stone-500 block mb-1">Fichier PDF</label>
+            <input type="file" accept="application/pdf" onChange={(e) => setUFile(e.target.files?.[0] || null)} className="text-sm" />
+          </div>
+        </div>
+        <button
+          onClick={handleUpload}
+          disabled={uploading || !biens.length}
+          className="flex items-center gap-1 text-xs font-medium bg-blue-900 text-white px-3 py-1.5 rounded-md hover:bg-blue-950 disabled:opacity-50"
+        >
+          <Upload size={14} /> {uploading ? "Envoi…" : "Ajouter le document"}
+        </button>
+      </div>
+
+      <input
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Rechercher un document..."
+        className="w-full px-3 py-1.5 rounded-md border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+      />
+
+      <div className="bg-white rounded-lg border border-stone-200 overflow-x-auto">
+        {visible.length === 0 ? (
+          <p className="text-sm text-stone-400 py-8 text-center">Aucun document.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-stone-400 border-b border-stone-100">
+                <SortableTh label="Date" sortKeyName="date" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                <SortableTh label="Libellé" sortKeyName="label" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                <SortableTh label="Type" sortKeyName="type" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                <SortableTh label="Bien" sortKeyName="bien" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                <th className="px-4 py-2 font-medium">Lien</th>
+                <th className="px-4 py-2 font-medium w-10"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-stone-100">
+              {visible.map((d) => (
+                <tr key={d.id} className="hover:bg-stone-50">
+                  <td className="px-4 py-2.5 text-stone-500 text-xs">{d.document_date ? formatDateFR(d.document_date) : "—"}</td>
+                  <td className="px-4 py-2.5 text-stone-800">{d.label}</td>
+                  <td className="px-4 py-2.5 text-stone-500 text-xs">{d.type}</td>
+                  <td className="px-4 py-2.5 text-stone-600">{bienById[d.bien_id]?.name || "—"}</td>
+                  <td className="px-4 py-2.5">
+                    <button onClick={() => handleDownload(d)} className="flex items-center gap-1 text-xs text-blue-800 hover:text-blue-950">
+                      <Download size={13} /> Télécharger
+                    </button>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <button onClick={() => handleDelete(d)} className="text-stone-400 hover:text-rose-600" aria-label="Supprimer">
+                      <Trash2 size={14} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function BauxTab({ baux, biens, contacts, bienById, contactById }) {
   const [editing, setEditing] = useState(undefined);
