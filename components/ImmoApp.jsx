@@ -104,6 +104,7 @@ export default function ImmoApp({ session }) {
     <div className="w-full min-h-screen bg-stone-50 font-sans text-stone-900 flex">
       <aside className="w-56 shrink-0 bg-stone-100 border-r border-stone-200 min-h-screen p-4 hidden sm:flex flex-col">
         <div className="mb-6 px-1">
+          <img src="/logo.png" alt="Immo famille" className="w-10 h-10 rounded-xl shadow-sm mb-2" />
           <p className="font-serif text-lg text-blue-900">Immo famille</p>
           <p className="text-xs text-stone-500 truncate">{session.user.email}</p>
         </div>
@@ -384,7 +385,11 @@ function RemboursementsTab({ biens, bienById }) {
 
   const filtered = rows.filter((r) => r.bien_id === selectedBienId);
   const todayStr = todayISO();
-  const currentRow = filtered.find((r) => r.date_echeance >= todayStr) || filtered[filtered.length - 1];
+  // Capital restant dû "aujourd'hui" = après la dernière échéance déjà passée (pas la prochaine, pas encore payée).
+  const pastRows = filtered.filter((r) => r.date_echeance <= todayStr);
+  const currentRow = pastRows.length
+    ? pastRows[pastRows.length - 1]
+    : filtered.find((r) => r.date_echeance >= todayStr) || filtered[filtered.length - 1];
   const capitalRestant = currentRow ? currentRow.capital_restant_du : 0;
   const interetsRestants = filtered
     .filter((r) => r.date_echeance >= todayStr)
@@ -522,7 +527,12 @@ function SimulationVenteTab({ biens }) {
 
   useEffect(() => {
     const schedule = remboursements.filter((r) => r.bien_id === bienId);
-    const currentRow = schedule.find((r) => r.date_echeance >= dateVente) || null;
+    // Capital restant dû à la date de vente = après la dernière échéance déjà passée à cette date
+    // (et non la prochaine échéance, pas encore payée : c'était l'origine du décalage d'un mois).
+    const past = schedule.filter((r) => r.date_echeance <= dateVente);
+    const currentRow = past.length
+      ? past[past.length - 1]
+      : schedule.find((r) => r.date_echeance >= dateVente) || null;
     // Pas de tableau d'amortissement pour ce bien -> on considère le prêt terminé (0)
     setCapitalRestantDu(currentRow ? String(currentRow.capital_restant_du) : "0");
   }, [bienId, dateVente, remboursements]);
