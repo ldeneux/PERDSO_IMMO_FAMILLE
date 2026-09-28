@@ -103,8 +103,8 @@ export default function ImmoApp({ session }) {
   return (
     <div className="w-full min-h-screen bg-stone-50 font-sans text-stone-900 flex">
       <aside className="w-56 shrink-0 bg-stone-100 border-r border-stone-200 min-h-screen p-4 hidden sm:flex flex-col">
-        <div className="mb-6 px-1">
-          <img src="/logo.png" alt="Immo famille" className="w-10 h-10 rounded-xl shadow-sm mb-2" />
+        <div className="mb-6 px-1 flex flex-col items-center text-center">
+          <img src="/logo.png" alt="Immo famille" className="w-24 h-24 rounded-2xl shadow-sm mb-2" />
           <p className="font-serif text-lg text-blue-900">Immo famille</p>
           <p className="text-xs text-stone-500 truncate">{session.user.email}</p>
         </div>
